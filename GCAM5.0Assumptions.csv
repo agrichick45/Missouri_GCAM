@@ -1,0 +1,20 @@
+﻿RegionBasinID,GCAMLand,UniqueID,VegC,soilC,Area ha
+1_223,Cropland,1_223_Cropland,6.014994379,92.11943307,31.37352582
+1_223,Grassland,1_223_Grassland,9,126,4990811
+1_223,ManagedForest,1_223_ManagedForest,124,162,923528.5
+1_223,ManagedPasture,1_223_ManagedPasture,9,117,690139.54
+1_223,OtherArableLand,1_223_OtherArableLand,3,90,13767625.43
+1_223,Shrubland,1_223_Shrubland,10,69,1342501
+1_223,Tundra,1_223_Tundra,9,220,84807
+1_223,UnmanagedForest,1_223_UnmanagedForest,124,162,7958387.5
+1_223,UnmanagedPasture,1_223_UnmanagedPasture,9,117,70667658.46
+1_223,UrbanLand,1_223_UrbanLand,3,58,812224
+8_223,Cropland,8_223_Cropland,1.218993428,90.07438818,0.62781341
+8_223,Grassland,8_223_Grassland,7,130,478369
+8_223,ManagedForest,8_223_ManagedForest,106,180,518.91
+8_223,ManagedPasture,8_223_ManagedPasture,7,128,112438.54
+8_223,OtherArableLand,8_223_OtherArableLand,3,90,1025890.81
+8_223,Shrubland,8_223_Shrubland,9,69,32643
+8_223,UnmanagedForest,8_223_UnmanagedForest,106,180,16896.09
+8_223,UnmanagedPasture,8_223_UnmanagedPasture,7,128,578201.46
+8_223,UrbanLand,8_223_UrbanLand,3,58,96

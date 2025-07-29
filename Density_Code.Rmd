@@ -1,0 +1,405 @@
+---
+title: "Density Calculations"
+output: html_document
+author: Mandy Liesch
+date: "2025-02-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#set the working directory here
+setwd("/Desktop/MissouriGCAM")
+
+```
+
+
+The objective of this code is to provide the processing of raw input files in the GCAM model to calculate the area, vegetative and soil emissions, as well as the overall vegetative soil and carbon density as a followup to the GCAM Soil Carbon Meeting with PNNL on 2/18/25.
+
+## Load Packages and Files 
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+
+#Load the vegetative carbon emissions
+NEW_AG_Missouri_Emissions <- read_csv("NEW_AG_Missouri_Emissions.csv")
+
+#load the land use history file
+newFullHist<-read_csv("fullHistory.csv")
+
+#Input my soil series
+FAO_soil <- read_csv("MissouriR_s84_soil_luc_data.csv")
+
+```
+
+## Load the Custom Color Pallettes 
+
+```{r}
+LUColors <- c("UrbanLand"="#C80813FF", "Tundra"="#71D0F5FF", 
+              "Rock/Ice/Desert"="#8A9197FF", "Cropland" = "#FED439FF",
+              "HarvCropLand"="#FED439FF", "OtherArableLand" = "#D2AF81FF", 
+              "Pasture"= "#FD8CC1FF", "UnmanagedPasture"="#370335FF", 
+              "Grassland" = "#46732EFF", "Forest" = "#075149FF", 
+              "Shrubland" = "#F05C3BFF", "otherNotArable"="#8A9197FF")
+
+# Vegetative Based Color Pallet
+vegCEmissions<-c("#46732EFF")
+```
+
+
+## Land Use Preprocessing
+
+```{r}
+#Do a final reclassification with the new forest definition
+newFullName<- newFullHist %>% 
+  mutate(LandUse = case_when(
+    Category == "HarvCropLand" ~ "HarvCropLand",
+    Category == "OtherArableLand" ~"OtherArableLand",
+    Category %in% c("Forest", "UnmanagedForest")~ "Forest",
+    Category =="Grassland" ~ "Grassland", 
+    Category=="Pasture" ~ "Pasture",
+    Category=="UnmanagedPasture"~ "UnmanagedPasture",
+    Category=="Shrubland" ~ "Shrubland",
+    Category=="Tundra" ~ "Tundra",
+    Category=="UrbanLand" ~ "UrbanLand"
+  )
+)
+
+#Resummarize the values by the new land use categories
+land_sum_cat_LU<-newFullName %>% 
+  group_by(LandUse) %>% 
+  #Sum everything that needs to happen
+  summarise(across(where(is.numeric), sum)) %>%
+  #remove all values with NA
+  filter(complete.cases(.))
+  
+
+#Pivot the tables to the long values
+newLongHist<- land_sum_cat_LU %>% 
+  pivot_longer(!c(LandUse), names_to="year", values_to = "area") %>%
+  #Rename the column to category
+  rename(Category = LandUse)
+```
+
+## Vegetative Emissions Preprocessing 
+
+```{r}
+#Break up the land leaf columns into subsets 
+#(each land leaf has 4 different categories)
+NA_MO_Veg<-NEW_AG_Missouri_Emissions%>% 
+  separate(LandLeaf, c("LandUse", "Basin", "Water", "Input"))
+
+#Sum together all of the land leaf files by land use t+ype
+sum_NA_MO_Veg<- NA_MO_Veg %>% 
+  group_by(LandUse) %>% 
+  summarise(across(where(is.numeric), sum))
+
+#Reclassify land use types into broader categories
+veg_cat_LU<-sum_NA_MO_Veg %>% mutate(Category = case_when(
+  #Cropland category  
+  LandUse %in% 
+    #Biomass Crops
+    c("biomassGrass", "biomassTree",  
+    #Fodder Crops
+      "FodderGrass", "FodderHerb", 
+    #Grain Crops
+      "Corn",  "Soybean", "Wheat", "OtherGrain",
+    #Oil Crops
+      "OilCrop", "Rapeseed", 
+    #Other Crops
+      "FiberCrop", "MiscCrop", "RootTuber",  "SugarCrop") 
+    #Land Use Name
+      ~ "HarvCropLand",
+    #Other Arable Land
+    LandUse == "OtherArableLand" ~"OtherArableLand",
+    #Forest categories
+    LandUse %in% c("Forest", "UnmanagedForest", "ProtectedUnmanagedForest")
+                ~ "Forest",
+    #Grassland categories
+    LandUse %in% c("Grassland", "ProtectedGrassland") ~ "Grassland", 
+    #Pasture category
+    LandUse=="Pasture" ~ "Pasture",
+    #Unamanged pasture category
+    LandUse %in% c("ProtectedUnmanagedPasture", "UnmanagedPasture") 
+              ~ "UnmanagedPasture",
+    #Shrubland category
+    LandUse %in% c("Shrubland", "ProtectedShrubland") ~ "Shrubland",
+    #Other categories
+    LandUse=="Tundra" ~ "Tundra",
+    LandUse=="UrbanLand" ~ "UrbanLand",
+    #Default Return Statement
+    TRUE~NA_character_
+  )
+)
+
+#Sum everything up by defined land use category
+veg_sum_cat_LU<-veg_cat_LU %>% 
+  group_by(Category) %>% 
+  summarise(across(where(is.numeric), sum))
+
+#Create a long dataframe with land use, years, and emissions rate
+veg_long_sum_LU<-veg_sum_cat_LU %>% 
+  pivot_longer(!c(Category), names_to="year", values_to = "emissions") %>%
+  #convert years into the numeric values
+  mutate(year = as.numeric(year))
+
+#Add the area "Area (thous km2)", to the emissions in (Mt CO2 Equiv/Year)
+new_veg<-merge(newLongHist, veg_long_sum_LU, all=TRUE)
+
+#Filter out the years required
+new_veg_filter<- new_veg %>% 
+  filter(year>= '1705'&year<='2060') %>%
+  #multiply emissions by 1000
+  mutate(kg = emissions*1000) %>%
+  #calculate density 
+  mutate(density =kg/area) %>%
+  #convert years into the numeric values
+  mutate(year = as.numeric(year)) #%>%
+  #filter out to the desired land use choice from above 
+
+  #CAUTION, if you do these options, the individual values wont reflect the name 
+  # correctly in the graphs. Look above for the other land use categories
+  
+  #filter(Category == 'Grassland')
+  #filter(Category == 'Pasture')
+  #filter(Category == 'OtherArableLand')
+
+
+
+```
+
+
+## Land and Vegetation Plots
+
+```{r}
+#Create a spaghetti plot of land use area using area by category
+landUseLines.plt<-ggplot(data= new_veg_filter, 
+                         aes(x=year, y=area, group=Category))+
+  geom_line(aes(color=Category), size=2) +
+  #add a title
+  ggtitle("A) Historic and Future Area by Land Use Type") +
+  #add labels
+  labs( x='Year', y='Land Area (thous sq km)') +
+  #use the custom color pallette
+  scale_color_manual(values=LUColors) +
+  #Fix the x scale and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #remove the legend
+  theme(legend.position = "none")
+
+
+#Calculate vegetative emissions graph by land use
+vegEmissLU.plt<-ggplot(data= new_veg_filter, aes(x=year, y=emissions, 
+                                              group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add the titles 
+  ggtitle("B) Historic and Future Vegetative Emissions by Land Use Type") +
+  #Add the labels
+  labs( x='Year', y='Annual Emissions (Mt/year)') + 
+  #Utilize the custom color scale and create the labels and spacing for 
+  #words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #scale and label the x axis breaks
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #add the legend at the bottom
+  theme(legend.position = "none")
+
+#create the density plots for land use by year
+vegDensity.plt<-ggplot(data= new_veg_filter, aes(x=year, y=density, 
+                                         group=Category, color=Category))+
+  geom_line(size=2) +
+  #add a title
+  ggtitle("C. Historic and Future Vegetative Emissions Rate of Change by Land Use Type") +
+  #add labels
+  labs( x='Year', y='Annualized Density (kg/thous sq km/Year)') +
+  #use custom color and labels 
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #customize the x axis breaks and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #but the legend on the bottom
+  theme(legend.position="bottom")
+
+
+
+```
+
+## Composite Vegetative Emissions and Density Graph
+
+```{r}
+compVegEmiss.plt<-ggarrange(landUseLines.plt, vegEmissLU.plt, vegDensity.plt,
+          ncol = 1, nrow = 3,
+          heights = c(2, 2, 3))
+
+compVegEmiss.plt
+
+```
+
+## FAO Soil Data Preprocessing
+
+```{r}
+
+# Remove the extra columns
+FAO_soil <- select(FAO_soil, -c(scenario, region))
+
+#Separate the LandLeaf series into four columns
+NA_MO_Soil<-FAO_soil%>% 
+  separate(LandLeaf, c("LandUse", "Basin", "Water", "Input"))
+
+#Sum by the soil type AND land uses
+sum_NA_MO_Soil<- NA_MO_Soil %>% 
+  group_by(LandUse) %>%
+  summarise(across(where(is.numeric), sum))
+
+#Recategorize the land use types into condensed categories
+soil_cat_LU<-sum_NA_MO_Soil %>% 
+  mutate(Category = case_when(
+#Cropland category  
+  LandUse %in% 
+    #Biomass Crops
+    c("biomassGrass", "biomassTree",  
+    #Fodder Crops
+      "FodderGrass", "FodderHerb", 
+    #Grain Crops
+      "Corn",  "Soybean", "Wheat", "OtherGrain",
+    #Oil Crops
+      "OilCrop", "Rapeseed", 
+    #Other Crops
+      "FiberCrop", "MiscCrop", "RootTuber",  "SugarCrop") 
+    #Land Use Name
+      ~ "HarvCropLand",
+    #Other Arable Land
+    LandUse == "OtherArableLand" ~"OtherArableLand",
+    #Forest categories
+    LandUse %in% c("Forest", "UnmanagedForest", "ProtectedUnmanagedForest")
+                ~ "Forest",
+    #Grassland categories
+    LandUse %in% c("Grassland", "ProtectedGrassland") ~ "Grassland", 
+    #Pasture category
+    LandUse=="Pasture" ~ "Pasture",
+    #Unamanged pasture category
+    LandUse %in% c("ProtectedUnmanagedPasture", "UnmanagedPasture") 
+              ~ "UnmanagedPasture",
+    #Shrubland category
+    LandUse %in% c("Shrubland", "ProtectedShrubland") ~ "Shrubland",
+    #Other categories
+    LandUse=="Tundra" ~ "Tundra",
+    LandUse=="UrbanLand" ~ "UrbanLand",
+    #Default Return Statement
+    TRUE~NA_character_
+  )
+)
+
+#Re-summarize by the newly defined categories
+soil_sum_cat_LU<-soil_cat_LU %>% 
+  group_by(Category) %>% 
+  summarise(across(where(is.numeric), sum))
+
+#Create the long values from the wide column
+soil_long_sum_LU<-soil_sum_cat_LU %>% 
+  pivot_longer(!c(Category), names_to="year", 
+               values_to = "emissions") 
+
+
+#Merge the land use variables to the soil values
+new_soil<-merge(newLongHist, soil_long_sum_LU, all=TRUE)
+
+
+new_soil_filter<- new_soil %>% 
+  filter(year>= '1705'&year<='2060') %>%
+  #multiply emissions by 1000
+  mutate(kg = emissions*1000) %>%
+  #calculate density 
+  mutate(density =kg/area) %>%
+  #convert the years to numeric
+  mutate(year = as.numeric(year)) #%>%
+  #filter out to the desired land use choice from above
+
+  #CAUTION, if you do these options, the individual values wont reflect the name 
+  # correctly in the graphs. Look above for the other land use categories
+
+  #filter(Category == 'Grassland')
+  #filter(Category == 'Pasture')
+  #filter(Category == 'OtherArableLand')
+
+```
+
+## FAO Soil Emissions and Density Calculations
+
+```{r}
+#Create the FAO Soil Emissions Plots
+soilEmissFAO.plt<-ggplot(data= new_soil_filter, aes(x=year, y=emissions, 
+                                             group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("FAO Glosis Emissions") +
+  #Add labels
+  labs( x='Year', y='Annual Emissions (Mt/year)') + 
+  #Utilize the custom color scale and create the labels and spacing 
+  #for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Scale and label the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #scale and label the y axis
+  scale_y_continuous(breaks=c(-90, -60, -30, 0, 30, 60, 90)) +
+  ylim(-110, 90) +
+  #add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #remove the axis title and legend
+  theme(axis.title.y = element_blank(),
+    legend.position = "none") 
+  
+
+#create a density plot for FAO
+soilDensFAO.plt<-ggplot(data= new_soil_filter, aes(x=year, y=density, 
+                                       group=Category, color=Category))+
+  geom_line(size=2) +
+  #add title
+  ggtitle("FAO Glosis Density") +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #add labels to the plot
+  labs( x='Year', y='(kg/thous sq km/Year)') +
+  #add the scale and labels for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  theme(legend.position="bottom") 
+
+```
+
+```{r}
+#Create the composite Emissions figure with Land Use, and emissions
+compSoilEmiss.plt<-ggarrange(landUseLines.plt, soilEmissFAO.plt, soilDensFAO.plt, ncol = 1, nrow=3, heights = c(2, 2, 3))
+
+compSoilEmiss.plt
+```

@@ -1,0 +1,1775 @@
+---
+title: "Missouri"
+output: html_document
+date: "2024-09-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+The objective of this R file is to cut all of the rasters to the shape of the Missouri River Basin, and extract all of the summary statistics for the 
+
+1) GCAM Raster
+2) SoilGrids 2017
+3) SoilGrids 2020
+4) Harmonized World Soils Database
+5) FAO Glosis Raster
+
+and create visualizations (histograms, freqency distributions, dumbell plots, etc.) to show the frequency by each land use type and raster type pairing. 
+ 
+This process involves
+1) Loading the basins shapefile and dissolving it to the Missouri river level, then isolating that file
+2) Taking the in house land use data product (Ramenkutty & HYDE SAGE & University of Wisconsin Tundra Values) and extracting the 8 different land use types in the Missouri River Basin
+3) 
+
+
+```{r packages}
+library(tidyverse)
+library(tidyterra)
+library(terra)
+library(exactextractr)
+library(sp)
+library(sf)
+library(ggalt)
+library(cowplot)
+library(ggridges)
+library(ggpubr)
+```
+
+```{r shapefiles}
+setwd("C:/Users/aliesch/OneDrive - Environmental Protection Agency (EPA)/Desktop/Boundaries")
+
+#Load the GCAM boundaries shapefile
+boundaries <-vect("reg_basin_boundaries_moirai_landcells_3p1_0p5arcmin.shp")
+
+#Choose the file of choice, US boundaries only
+missouri <- subset(boundaries, boundaries$basin_nm == "Missouri_River_Basin" & boundaries$reg_nm== "USA")
+
+```
+
+```{r land use}
+setwd("C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Documents/soilrastercomparison/rasters")
+
+#Recall:
+#Values in the Land Use Raster correspond to:
+# 1: Cropland
+# 2: Forest
+# 3: Grassland
+# 4: Shrubland
+# 5: Urban Land
+# 6: RID
+# 7: Tundra
+# 8: Pasture
+
+land_use<-rast("Reprojected_LandUseRaster_igh.tif")
+
+missouri_igh<-project(missouri, land_use)
+
+crop_land_use<-crop(land_use, missouri_igh)
+
+basin_land_use<-mask(crop_land_use, missouri_igh)
+
+writeRaster(basin_land_use, "C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_MO.tif")
+
+land_use_MO<-rast("C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_MO.tif")
+
+cls <- data.frame(id=1:8, cover=c("Cropland", "Forest", "Grassland", "Shrubland", "Urban", "Rock/Ice/Desert",  "Tundra", "Pasture"))
+
+levels(land_use_MO) <- cls
+
+cols <- c("Cropland" = "#ffc814", "Forest" = "darkgreen", "Grassland" = "green", "Shrubland" = "darkorange", "Urban"='red', "Rock/Ice/Desert"='grey', "Tundra"='white', "Pasture"='lightgreen')
+
+land_use_US_MO<-ggplot()+
+  geom_spatraster(data=na.omit(land_use_MO))+
+  scale_fill_manual(values = cols, na.value = "transparent", na.translate = F)+
+  labs(fill = "Land Use Type", title="A) Missouri River Basin Land Use")
+
+land_use_NO_Leg<- land_use_US_MO +
+  theme(legend.position='none')
+
+
+leg<- cowplot::get_legend(land_use_US_MO)
+
+
+legend<-as_ggplot(leg)
+  
+
+```
+
+```{r, mask generation}
+
+setwd("C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM")
+
+## 1: Cropland--------------
+cropmask_LU_MO<- classify(
+  basin_land_use, cbind(id=c(1, 2, 3, 4, 5, 6, 7, 8), #classify a spatraster
+    v=c(1, NA, NA, NA, NA, NA, NA, NA)))
+
+writeRaster(cropmask_LU_MO, "C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_Mask/LU_cropmask.tif")
+
+## 2: Forest---------------
+forestmask_LU_MO<- classify(basin_land_use, cbind(id=c(1, 2, 3, 4, 5, 6, 7, 8),
+                                               v=c(NA, 1, NA, NA, NA, NA, NA, NA)))
+
+writeRaster(forestmask_LU_MO, "C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_Mask/LU_forestmask.tif")
+
+## 3: Grassland---------------
+grassmask_LU_MO<- classify(basin_land_use, cbind(id=c(1, 2, 3, 4, 5, 6, 7, 8),
+                                              v=c(NA, NA, 1, NA, NA, NA, NA, NA)))
+
+writeRaster(grassmask_LU_MO, "C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_Mask/LU_grassmask.tif")
+
+## 4: Shrubland---------------
+shrubmask_LU_MO<- classify(basin_land_use, cbind(id=c(1, 2, 3, 4, 5, 6, 7, 8),
+                                              v=c(NA, NA, NA, 1, NA, NA, NA, NA)))
+
+writeRaster(shrubmask_LU_MO, "C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_Mask/LU_shrubmask.tif")
+
+## 5: Urban Land---------------
+urbanmask_LU_MO<- classify(basin_land_use, cbind(id=c(1, 2, 3, 4, 5, 6, 7, 8),
+                                              v=c(NA, NA, NA, NA, 1, NA, NA, NA)))
+
+writeRaster(urbanmask_LU_MO, "C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_Mask/LU_urbanmask.tif")
+
+## 6: RID---------------
+RIDmask_LU_MO<- classify(basin_land_use, cbind(id=c(1, 2, 3, 4, 5, 6, 7, 8),
+                                     v=c(NA, NA, NA, NA, NA, 1, NA, NA)))
+
+writeRaster(RIDmask_LU_MO, "C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_Mask/LU_RIDmask.tif")
+
+## 7: Tundra---------------
+tundramask_LU_MO<- classify(basin_land_use, cbind(id=c(1, 2, 3, 4, 5, 6, 7, 8),
+                                        v=c(NA, NA, NA, NA, NA, NA, 1, NA)))
+
+writeRaster(tundramask_LU_MO, "C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_Mask/LU_tundramask.tif")
+
+## 8: Pasture---------------
+pasturemask_LU_MO<- classify(basin_land_use, cbind(id=c(1, 2, 3, 4, 5, 6, 7, 8),
+                                         v=c(NA, NA, NA, NA, NA, NA, NA, 1)))
+
+writeRaster(pasturemask_LU_MO, "C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_Mask/LU_pasturemask.tif")
+```
+
+```{r Read Masks}
+cropmask_LU_MO<-rast("LU_Mask/LU_cropmask.tif")
+forestmask_LU_MO<-rast("LU_Mask/LU_forestmask.tif")
+grassmask_LU_MO<-rast("LU_Mask/LU_grassmask.tif")
+shrubmask_LU_MO<-rast("LU_Mask/LU_shrubmask.tif")
+urbanmask_LU_MO<-rast("LU_Mask/LU_urbanmask.tif")
+RIDmask_LU_MO<-rast("LU_Mask/LU_RIDmask.tif")
+pasturemask_LU_MO<-rast("LU_Mask/LU_pasturemask.tif")
+```
+
+```{r, GCAM Extractions}
+GCAM_SOC_MO<-rast("GCAM_miss.tif")
+
+## 1: GCAM Cropland--------------
+
+GCAM_SOC_cropland<- mask(GCAM_SOC_MO, cropmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/GCAM_SOC_cropland.tif")
+
+GCAM_SOC_forest<- mask(GCAM_SOC_MO, forestmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/GCAM_SOC_forestland.tif")
+
+GCAM_SOC_grassland<- mask(GCAM_SOC_MO, grassmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/GCAM_SOC_grassland.tif")
+
+GCAM_SOC_shrubland<- mask(GCAM_SOC_MO, shrubmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/GCAM_SOC_shrubland.tif")
+
+GCAM_SOC_urbanland<- mask(GCAM_SOC_MO, urbanmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/GCAM_SOC_urbanland.tif")
+
+GCAM_SOC_RIDland<- mask(GCAM_SOC_MO, RIDmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/GCAM_SOC_RIDland.tif")
+
+GCAM_SOC_tundraland<- mask(GCAM_SOC_MO, tundramask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/GCAM_SOC_tundraland.tif")
+
+GCAM_SOC_pastureland<- mask(GCAM_SOC_MO, pasturemask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/GCAM_SOC_pastureland.tif")
+```
+
+```{r, GCAM Calculations}
+BasinShapeFile_igh<-sf::st_as_sf(missouri_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/GCAM_SOC_cropland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "cropland"
+BasinShapeFile_igh$Model<-'GCAM'
+
+
+SoilGridSummaryStats<- BasinShapeFile_igh
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/GCAM_SOC_forestland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "forest"
+BasinShapeFile_igh$Model<-'GCAM'
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/GCAM_SOC_grassland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "grassland"
+BasinShapeFile_igh$Model<-'GCAM'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/GCAM_SOC_shrubland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "shrubland"
+BasinShapeFile_igh$Model<-'GCAM'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/GCAM_SOC_urbanland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "urbanland"
+BasinShapeFile_igh$Model<-'GCAM'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/GCAM_SOC_RIDland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "RID"
+BasinShapeFile_igh$Model<-'GCAM'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/GCAM_SOC_pastureland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "pasture"
+BasinShapeFile_igh$Model<-'GCAM'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+SoilGridSummaryStats$geometry<-NULL
+
+write.csv(SoilGridSummaryStats, "Output_SOC_Mask/GCAM_Summary.csv")
+```
+
+```{r, FAO Extractions}
+FAO_SOC_MO_org<-rast("FAO_miss.tif")
+
+FAO_SOC_MO<-mask(FAO_SOC_MO_org, missouri_igh)
+FAO_SOC_MO<-crop(FAO_SOC_MO, missouri_igh)
+
+## 1: GCAM Cropland--------------
+
+FAO_SOC_cropland<- mask(FAO_SOC_MO, cropmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/FAO_SOC_cropland.tif")
+
+FAO_SOC_forest<- mask(FAO_SOC_MO, forestmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/FAO_SOC_forestland.tif")
+
+FAO_SOC_grassland<- mask(FAO_SOC_MO, grassmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/FAO_SOC_grassland.tif")
+
+FAO_SOC_shrubland<- mask(FAO_SOC_MO, shrubmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/FAO_SOC_shrubland.tif")
+
+FAO_SOC_urbanland<- mask(FAO_SOC_MO, urbanmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/FAO_SOC_urbanland.tif")
+
+FAO_SOC_RIDland<- mask(FAO_SOC_MO, RIDmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/FAO_SOC_RIDland.tif")
+
+#FAO_SOC_tundraland<- mask(FAO_SOC_MO, tundramask_LU_MO, 
+ #                              inverse = FALSE, updatevalue = NA, 
+  #                             filename = "Output_SOC_Mask/FAO_SOC_tundraland.tif")
+
+FAO_SOC_pastureland<- mask(FAO_SOC_MO, pasturemask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/FAO_SOC_pastureland.tif")
+```
+
+```{r, FAO Calculations}
+BasinShapeFile_igh<-sf::st_as_sf(missouri_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/FAO_SOC_cropland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "cropland"
+BasinShapeFile_igh$Model<-'FAO'
+
+
+SoilGridSummaryStats<- BasinShapeFile_igh
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/FAO_SOC_forestland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "forest"
+BasinShapeFile_igh$Model<-'FAO'
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/FAO_SOC_grassland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "grassland"
+BasinShapeFile_igh$Model<-'FAO'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/FAO_SOC_shrubland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "shrubland"
+BasinShapeFile_igh$Model<-'FAO'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/FAO_SOC_urbanland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "urbanland"
+BasinShapeFile_igh$Model<-'FAO'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/FAO_SOC_RIDland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "RID"
+BasinShapeFile_igh$Model<-'FAO'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/FAO_SOC_pastureland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "pasture"
+BasinShapeFile_igh$Model<-'FAO'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+SoilGridSummaryStats$geometry<-NULL
+
+write.csv(SoilGridSummaryStats, "Output_SOC_Mask/FAO_Summary.csv")
+```
+
+```{r, HWSD Extractions}
+HWSD_SOC_MO_org<-rast("HWSD_miss.tif")
+
+HWSD_SOC_MO<-mask(HWSD_SOC_MO_org, missouri_igh)
+HWSD_SOC_MO<-crop(HWSD_SOC_MO, missouri_igh)
+
+## 1: GCAM Cropland--------------
+
+HWSD_SOC_cropland<- mask(HWSD_SOC_MO, cropmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/HWSD_SOC_cropland.tif")
+
+HWSD_SOC_forest<- mask(HWSD_SOC_MO, forestmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/HWSD_SOC_forestland.tif")
+
+HWSD_SOC_grassland<- mask(HWSD_SOC_MO, grassmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/HWSD_SOC_grassland.tif")
+
+HWSD_SOC_shrubland<- mask(HWSD_SOC_MO, shrubmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/HWSD_SOC_shrubland.tif")
+
+HWSD_SOC_urbanland<- mask(HWSD_SOC_MO, urbanmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/HWSD_SOC_urbanland.tif")
+
+HWSD_SOC_RIDland<- mask(HWSD_SOC_MO, RIDmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/HWSD_SOC_RIDland.tif")
+
+#HWSD_SOC_tundraland<- mask(HWSD_SOC_MO, tundramask_LU_MO, 
+ #                              inverse = FALSE, updatevalue = NA, 
+  #                             filename = "Output_SOC_Mask/HWSD_SOC_tundraland.tif")
+
+HWSD_SOC_pastureland<- mask(HWSD_SOC_MO, pasturemask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/HWSD_SOC_pastureland.tif")
+```
+
+
+```{r, HWSD Calculations}
+BasinShapeFile_igh<-sf::st_as_sf(missouri_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/HWSD_SOC_cropland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "cropland"
+BasinShapeFile_igh$Model<-'HWSD'
+
+
+SoilGridSummaryStats<- BasinShapeFile_igh
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/HWSD_SOC_forestland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "forest"
+BasinShapeFile_igh$Model<-'HWSD'
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/HWSD_SOC_grassland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "grassland"
+BasinShapeFile_igh$Model<-'HWSD'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/HWSD_SOC_shrubland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "shrubland"
+BasinShapeFile_igh$Model<-'HWSD'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/HWSD_SOC_urbanland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "urbanland"
+BasinShapeFile_igh$Model<-'HWSD'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/HWSD_SOC_RIDland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "RID"
+BasinShapeFile_igh$Model<-'HWSD'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/HWSD_SOC_pastureland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "pasture"
+BasinShapeFile_igh$Model<-'HWSD'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+SoilGridSummaryStats$geometry<-NULL
+
+write.csv(SoilGridSummaryStats, "Output_SOC_Mask/HWSD_Summary.csv")
+
+```
+
+
+```{r, SG17 Extractions}
+SG17_SOC_MO_org<-rast("SG2017_miss.tif")
+
+SG17_SOC_MO<-mask(SG17_SOC_MO_org, missouri_igh)
+SG17_SOC_MO<-crop(SG17_SOC_MO, missouri_igh)
+
+## 1: GCAM Cropland--------------
+
+SG17_SOC_cropland<- mask(SG17_SOC_MO, cropmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG17_SOC_cropland.tif")
+
+SG17_SOC_forest<- mask(SG17_SOC_MO, forestmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG17_SOC_forestland.tif")
+
+SG17_SOC_grassland<- mask(SG17_SOC_MO, grassmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG17_SOC_grassland.tif")
+
+SG17_SOC_shrubland<- mask(SG17_SOC_MO, shrubmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG17_SOC_shrubland.tif")
+
+SG17_SOC_urbanland<- mask(SG17_SOC_MO, urbanmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG17_SOC_urbanland.tif")
+
+SG17_SOC_RIDland<- mask(SG17_SOC_MO, RIDmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG17_SOC_RIDland.tif")
+
+#SG17_SOC_tundraland<- mask(SG17_SOC_MO, tundramask_LU_MO, 
+ #                              inverse = FALSE, updatevalue = NA, 
+  #                             filename = "Output_SOC_Mask/SG17_SOC_tundraland.tif")
+
+SG17_SOC_pastureland<- mask(SG17_SOC_MO, pasturemask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG17_SOC_pastureland.tif")
+
+```
+
+```{r, SG17 Calculations}
+BasinShapeFile_igh<-sf::st_as_sf(missouri_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG17_SOC_cropland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "cropland"
+BasinShapeFile_igh$Model<-'SG17'
+
+
+SoilGridSummaryStats<- BasinShapeFile_igh
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG17_SOC_forestland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "forest"
+BasinShapeFile_igh$Model<-'SG17'
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG17_SOC_grassland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "grassland"
+BasinShapeFile_igh$Model<-'SG17'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG17_SOC_shrubland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "shrubland"
+BasinShapeFile_igh$Model<-'SG17'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG17_SOC_urbanland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "urbanland"
+BasinShapeFile_igh$Model<-'SG17'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG17_SOC_RIDland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "RID"
+BasinShapeFile_igh$Model<-'SG17'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG17_SOC_pastureland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "pasture"
+BasinShapeFile_igh$Model<-'SG17'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+SoilGridSummaryStats$geometry<-NULL
+
+write.csv(SoilGridSummaryStats, "Output_SOC_Mask/SG17_Summary.csv")
+
+```
+
+
+```{r, SG20 Extractions}
+SG20_SOC_MO_org<-rast("SG2020_miss.tif")
+
+SG20_SOC_MO<-mask(SG20_SOC_MO_org, missouri_igh)
+SG20_SOC_MO<-crop(SG20_SOC_MO, missouri_igh)
+
+## 1: GCAM Cropland--------------
+
+SG20_SOC_cropland<- mask(SG20_SOC_MO, cropmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG20_SOC_cropland.tif")
+
+SG20_SOC_forest<- mask(SG20_SOC_MO, forestmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG20_SOC_forestland.tif")
+
+SG20_SOC_grassland<- mask(SG20_SOC_MO, grassmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG20_SOC_grassland.tif")
+
+SG20_SOC_shrubland<- mask(SG20_SOC_MO, shrubmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG20_SOC_shrubland.tif")
+
+SG20_SOC_urbanland<- mask(SG20_SOC_MO, urbanmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG20_SOC_urbanland.tif")
+
+SG20_SOC_RIDland<- mask(SG20_SOC_MO, RIDmask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG20_SOC_RIDland.tif")
+
+#SG20_SOC_tundraland<- mask(SG20_SOC_MO, tundramask_LU_MO, 
+ #                              inverse = FALSE, updatevalue = NA, 
+  #                             filename = "Output_SOC_Mask/SG20_SOC_tundraland.tif")
+
+SG20_SOC_pastureland<- mask(SG20_SOC_MO, pasturemask_LU_MO, 
+                               inverse = FALSE, updatevalue = NA, 
+                               filename = "Output_SOC_Mask/SG20_SOC_pastureland.tif")
+
+```
+
+```{r, SG20 Calculations}
+BasinShapeFile_igh<-sf::st_as_sf(missouri_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG20_SOC_cropland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "cropland"
+BasinShapeFile_igh$Model<-'SG20'
+
+
+SoilGridSummaryStats<- BasinShapeFile_igh
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG20_SOC_forestland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "forest"
+BasinShapeFile_igh$Model<-'SG20'
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG20_SOC_grassland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "grassland"
+BasinShapeFile_igh$Model<-'SG20'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG20_SOC_shrubland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "shrubland"
+BasinShapeFile_igh$Model<-'SG20'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG20_SOC_urbanland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "urbanland"
+BasinShapeFile_igh$Model<-'SG20'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG20_SOC_RIDland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "RID"
+BasinShapeFile_igh$Model<-'SG20'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+
+
+
+CarbonSoilRaster<-rast("Output_SOC_Mask/SG20_SOC_pastureland.tif")
+
+BasinShapeFile_igh$mean<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mean')
+BasinShapeFile_igh$minimum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'min')
+BasinShapeFile_igh$maximum<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'max')
+BasinShapeFile_igh$mode<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, 'mode')
+BasinShapeFile_igh$Ten<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.10)
+BasinShapeFile_igh$Q1<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh,  fun='quantile', quantiles=0.25)
+BasinShapeFile_igh$median<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles= 0.5)
+BasinShapeFile_igh$Q3<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.75)
+BasinShapeFile_igh$Ninety<- exact_extract(CarbonSoilRaster, BasinShapeFile_igh, fun='quantile', quantiles=0.90)
+BasinShapeFile_igh$LandType<- "pasture"
+BasinShapeFile_igh$Model<-'SG20'
+
+
+
+SoilGridSummaryStats <- rbind(SoilGridSummaryStats, BasinShapeFile_igh)
+
+SoilGridSummaryStats$geometry<-NULL
+
+write.csv(SoilGridSummaryStats, "Output_SOC_Mask/SG20_Summary.csv")
+
+```
+
+
+```{r, Put Together Code}
+#Get the five different extraction files
+GCAM_Sum_Stats<-read_csv("Output_SOC_Mask/GCAM_Summary.csv")
+FAO_Sum_Stats<-read_csv("Output_SOC_Mask/FAO_Summary.csv")
+HWSD_Sum_Stats<-read_csv("Output_SOC_Mask/HWSD_Summary.csv")
+SG17_Sum_Stats<-read_csv("Output_SOC_Mask/SG17_Summary.csv")
+SG20_Sum_Stats<-read_csv("Output_SOC_Mask/SG20_Summary.csv")
+
+landtypeorder<- c("forest", "grassland", "shrubland", "cropland", "pasture", "urbanland", "tundra", "RID")
+landtypecolororder<- c("#136839", "#01937c", "#B6c867", "#ffc814", "#9d73bc", "#C63A7C", "#faf1e6", "#ADD5FF") #RID original color for maps: #dcedff
+
+# Rainbow dumbbell
+GcAM<-ggplot(GCAM_Sum_Stats)+
+  geom_dumbbell(aes(y= `LandType`, x=minimum, xend= maximum), color= "#adb5bd", size=1)+
+  geom_dumbbell(aes(y= `LandType`, x=Ten, xend=Ninety, color = factor(LandType, levels=landtypeorder)), 
+                size=1.75)+scale_color_manual(values=landtypecolororder)+
+  geom_point(aes(y= `LandType`, x=median), size=1.5, color = "red")+
+  geom_point(aes(y= `LandType`, x=Q1), size=3, color = "blue", shape= "|")+
+  geom_point(aes(y= `LandType`, x=Q3), size=3, color = "blue", shape= "|")+
+  theme(axis.text.y= element_text(size= 10))+facet_wrap(~basin_nm)+theme_minimal()+
+  labs(x= "Soil Organic Carbon Stock 0-30cm, tC/ha", y= "Land Type")+
+  theme(legend.position = "none")
+
+FAO<-ggplot(FAO_Sum_Stats)+
+  geom_dumbbell(aes(y= `LandType`, x=minimum, xend= maximum), color= "#adb5bd", size=1)+
+  geom_dumbbell(aes(y= `LandType`, x=Ten, xend=Ninety, color = factor(LandType, levels=landtypeorder)), 
+                size=1.75)+scale_color_manual(values=landtypecolororder)+
+  geom_point(aes(y= `LandType`, x=median), size=1.5, color = "red")+
+  geom_point(aes(y= `LandType`, x=Q1), size=3, color = "blue", shape= "|")+
+  geom_point(aes(y= `LandType`, x=Q3), size=3, color = "blue", shape= "|")+
+  theme(axis.text.y= element_text(size= 10))+facet_wrap(~basin_nm)+theme_minimal()+
+  labs(x= "Soil Organic Carbon Stock 0-30cm, tC/ha", y= "Land Type")+
+  theme(legend.position = "none")
+
+HWSD<-ggplot(HWSD_Sum_Stats)+
+  geom_dumbbell(aes(y= `LandType`, x=minimum, xend= maximum), color= "#adb5bd", size=1)+
+  geom_dumbbell(aes(y= `LandType`, x=Ten, xend=Ninety, color = factor(LandType, levels=landtypeorder)), 
+                size=1.75)+scale_color_manual(values=landtypecolororder)+
+  geom_point(aes(y= `LandType`, x=median), size=1.5, color = "red")+
+  geom_point(aes(y= `LandType`, x=Q1), size=3, color = "blue", shape= "|")+
+  geom_point(aes(y= `LandType`, x=Q3), size=3, color = "blue", shape= "|")+
+  theme(axis.text.y= element_text(size= 10))+facet_wrap(~basin_nm)+theme_minimal()+
+  labs(x= "Soil Organic Carbon Stock 0-30cm, tC/ha", y= "Land Type")+
+  theme(legend.position = "none")
+
+SG17<-ggplot(SG17_Sum_Stats)+
+  geom_dumbbell(aes(y= `LandType`, x=minimum, xend= maximum), color= "#adb5bd", size=1)+
+  geom_dumbbell(aes(y= `LandType`, x=Ten, xend=Ninety, color = factor(LandType, levels=landtypeorder)), 
+                size=1.75)+scale_color_manual(values=landtypecolororder)+
+  geom_point(aes(y= `LandType`, x=median), size=1.5, color = "red")+
+  geom_point(aes(y= `LandType`, x=Q1), size=3, color = "blue", shape= "|")+
+  geom_point(aes(y= `LandType`, x=Q3), size=3, color = "blue", shape= "|")+
+  theme(axis.text.y= element_text(size= 10))+facet_wrap(~basin_nm)+theme_minimal()+
+  labs(x= "Soil Organic Carbon Stock 0-30cm, tC/ha", y= "Land Type")+
+  theme(legend.position = "none")
+
+
+SG20<-ggplot(SG20_Sum_Stats)+
+  geom_dumbbell(aes(y= `LandType`, x=minimum, xend= maximum), color= "#adb5bd", size=1)+
+  geom_dumbbell(aes(y= `LandType`, x=Ten, xend=Ninety, color = factor(LandType, levels=landtypeorder)), 
+                size=1.75)+scale_color_manual(values=landtypecolororder)+
+  geom_point(aes(y= `LandType`, x=median), size=1.5, color = "red")+
+  geom_point(aes(y= `LandType`, x=Q1), size=3, color = "blue", shape= "|")+
+  geom_point(aes(y= `LandType`, x=Q3), size=3, color = "blue", shape= "|")+
+  theme(axis.text.y= element_text(size= 10))+facet_wrap(~basin_nm)+theme_minimal()+
+  labs(x= "Soil Organic Carbon Stock 0-30cm, tC/ha", y= "Land Type")+
+  theme(legend.position = "none")
+```
+
+```{r Cropland}
+
+LandUseRaster<-rast("Output_SOC_Mask/GCAM_SOC_cropland.tif")
+
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'GCAM'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Crop_DF<-LU_DF_filter
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/FAO_SOC_cropland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'FAO'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 175)
+
+
+Crop_DF<-rbind(Crop_DF, LU_DF_filter)
+
+
+LandUseRaster<-rast("Output_SOC_Mask/HWSD_SOC_cropland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'HWSD'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Crop_DF<-rbind(Crop_DF, LU_DF_filter)
+
+LandUseRaster<-rast("Output_SOC_Mask/SG17_SOC_cropland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG17'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Crop_DF<-rbind(Crop_DF, LU_DF_filter)
+
+LandUseRaster<-rast("Output_SOC_Mask/SG20_SOC_cropland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG20'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Crop_DF<-rbind(Crop_DF, LU_DF_filter)
+
+
+#ggplot(Crop_DF, aes(breaks, counts, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+
+#ggplot(Crop_DF, aes(breaks, model, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+#modelorder<- c("GCAM", "FAO", "HWSD", "SG17", "SG20")
+#modelcolororder<- c("#9d73bc", "#ADD5FF", "#136839", "#ffc814", "#C63A7C" ) 
+
+cropDist<-ggplot(Crop_DF, aes(breaks, model, height = counts, group = model)) + 
+  geom_density_ridges2(fill="#ffc814", stat = "identity", scale = 3)+
+  theme(axis.title.y = element_blank())+
+  labs(title="C) Crop SOC Distribution By Model", x = "SOC Mg C/ha")
+
+```
+
+```{r Forest}
+LandUseRaster<-rast("Output_SOC_Mask/GCAM_SOC_forestland.tif")
+
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'GCAM'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Forest_DF<-LU_DF_filter
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/FAO_SOC_forestland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'FAO'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Forest_DF<-rbind(Forest_DF, LU_DF_filter)
+
+
+LandUseRaster<-rast("Output_SOC_Mask/HWSD_SOC_forestland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'HWSD'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Forest_DF<-rbind(Forest_DF, LU_DF_filter)
+
+LandUseRaster<-rast("Output_SOC_Mask/SG17_SOC_forestland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG17'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Forest_DF<-rbind(Forest_DF, LU_DF_filter)
+
+LandUseRaster<-rast("Output_SOC_Mask/SG20_SOC_forestland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG20'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Forest_DF<-rbind(Forest_DF, LU_DF_filter)
+
+
+#ggplot(Crop_DF, aes(breaks, counts, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+
+#ggplot(Crop_DF, aes(breaks, model, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+#modelorder<- c("GCAM", "FAO", "HWSD", "SG17", "SG20")
+#modelcolororder<- c("#9d73bc", "#ADD5FF", "#136839", "#ffc814", "#C63A7C" ) 
+
+forestDist<-ggplot(Forest_DF, aes(breaks, model, height = counts, group = model)) +
+  geom_density_ridges2(fill="darkgreen", stat = "identity", scale = 3)+
+  theme(axis.title.y = element_blank())+
+  labs(title="D) Forest SOC Distribution By Model", x = "SOC Mg C/ha")
+
+```
+
+```{r Grassland}
+LandUseRaster<-rast("Output_SOC_Mask/GCAM_SOC_grassland.tif")
+
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'GCAM'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Grass_DF<-LU_DF_filter
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/FAO_SOC_grassland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'FAO'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Grass_DF<-rbind(Grass_DF, LU_DF_filter)
+
+
+LandUseRaster<-rast("Output_SOC_Mask/HWSD_SOC_grassland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'HWSD'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Grass_DF<-rbind(Grass_DF, LU_DF_filter)
+
+LandUseRaster<-rast("Output_SOC_Mask/SG17_SOC_grassland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG17'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Grass_DF<-rbind(Grass_DF, LU_DF_filter)
+
+
+LandUseRaster<-rast("Output_SOC_Mask/SG20_SOC_grassland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG20'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Grass_DF<-rbind(Grass_DF, LU_DF_filter)
+
+
+#ggplot(Crop_DF, aes(breaks, counts, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+
+#ggplot(Crop_DF, aes(breaks, model, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+#modelorder<- c("GCAM", "FAO", "HWSD", "SG17", "SG20")
+#modelcolororder<- c("#9d73bc", "#ADD5FF", "#136839", "#ffc814", "#C63A7C" ) 
+
+grassDist<-ggplot(Grass_DF, aes(breaks, model, height = counts, group = model)) + 
+  geom_density_ridges2(fill="green", stat = "identity", scale = 3)+
+  theme(axis.title.y = element_blank())+
+  labs(title="E) Grassland SOC Distribution By Model", x = "SOC Mg C/ha")
+
+```
+
+```{r Shrubland}
+LandUseRaster<-rast("Output_SOC_Mask/GCAM_SOC_shrubland.tif")
+
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'GCAM'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Shrub_DF<-LU_DF_filter
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/FAO_SOC_shrubland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'FAO'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Shrub_DF<-rbind(Shrub_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/HWSD_SOC_shrubland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'HWSD'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Shrub_DF<-rbind(Shrub_DF, LU_DF_filter)
+
+
+LandUseRaster<-rast("Output_SOC_Mask/SG17_SOC_shrubland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG17'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Shrub_DF<-rbind(Shrub_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/SG20_SOC_shrubland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG20'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Shrub_DF<-rbind(Shrub_DF, LU_DF_filter)
+
+
+#ggplot(Crop_DF, aes(breaks, counts, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+
+#ggplot(Crop_DF, aes(breaks, model, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+#modelorder<- c("GCAM", "FAO", "HWSD", "SG17", "SG20")
+#modelcolororder<- c("#9d73bc", "#ADD5FF", "#136839", "#ffc814", "#C63A7C" ) 
+
+shrubDist<-ggplot(Shrub_DF, aes(breaks, model, height = counts, group = model)) + 
+  geom_density_ridges2(fill="darkorange", stat = "identity", scale = 3)+
+  theme(axis.title.y = element_blank())+
+  labs(title="F) Shrubland SOC Distribution By Model", x = "SOC Mg C/ha")
+
+```
+
+```{r Urbanland}
+LandUseRaster<-rast("Output_SOC_Mask/GCAM_SOC_urbanland.tif")
+
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'GCAM'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Urban_DF<-LU_DF_filter
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/FAO_SOC_urbanland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'FAO'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Urban_DF<-rbind(Urban_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/HWSD_SOC_urbanland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'HWSD'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Urban_DF<-rbind(Urban_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/SG17_SOC_urbanland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG17'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Urban_DF<-rbind(Urban_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/SG20_SOC_urbanland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG20'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Urban_DF<-rbind(Urban_DF, LU_DF_filter)
+
+
+
+#ggplot(Crop_DF, aes(breaks, counts, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+
+#ggplot(Crop_DF, aes(breaks, model, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+#modelorder<- c("GCAM", "FAO", "HWSD", "SG17", "SG20")
+#modelcolororder<- c("#9d73bc", "#ADD5FF", "#136839", "#ffc814", "#C63A7C" ) 
+
+urbanDist<-ggplot(Shrub_DF, aes(breaks, model, height = counts, group = model)) + 
+  geom_density_ridges2(fill="red", stat = "identity", scale = 3) +
+  theme(axis.title.y = element_blank())+
+  labs(title="G) Urban SOC Distribution By Model", x = "SOC Mg C/ha")
+
+```
+
+```{r RID}
+LandUseRaster<-rast("Output_SOC_Mask/GCAM_SOC_RIDland.tif")
+
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'GCAM'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+RID_DF<-LU_DF_filter
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/FAO_SOC_RIDland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'FAO'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+RID_DF<-rbind(RID_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/HWSD_SOC_RIDland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'HWSD'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+RID_DF<-rbind(RID_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/SG17_SOC_RIDland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG17'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+RID_DF<-rbind(RID_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/SG20_SOC_RIDland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG20'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+RID_DF<-rbind(RID_DF, LU_DF_filter)
+
+
+
+#ggplot(Crop_DF, aes(breaks, counts, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+
+#ggplot(Crop_DF, aes(breaks, model, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+#modelorder<- c("GCAM", "FAO", "HWSD", "SG17", "SG20")
+#modelcolororder<- c("#9d73bc", "#ADD5FF", "#136839", "#ffc814", "#C63A7C" ) 
+
+RIDDist<-ggplot(Shrub_DF, aes(breaks, model, height = counts, group = model)) + 
+  geom_density_ridges2(fill= "grey", stat = "identity", scale = 3) +
+  theme(axis.title.y = element_blank())+
+  labs(title="H) Rock/Ice/Desert SOC Distribution By Model", x = "SOC Mg C/ha")
+
+```
+
+```{r Pastureland}
+LandUseRaster<-rast("Output_SOC_Mask/GCAM_SOC_pastureland.tif")
+
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'GCAM'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Pasture_DF<-LU_DF_filter
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/FAO_SOC_pastureland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'FAO'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Pasture_DF<-rbind(Pasture_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/HWSD_SOC_pastureland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'HWSD'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Pasture_DF<-rbind(Pasture_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/SG17_SOC_pastureland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG17'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+
+Pasture_DF<-rbind(Pasture_DF, LU_DF_filter)
+
+
+
+LandUseRaster<-rast("Output_SOC_Mask/SG20_SOC_pastureland.tif")
+  
+LU_Hist<-hist(LandUseRaster, breaks=seq(0, 700, by=3), maxcell=10000000, plot=TRUE)
+
+LU_DF <- data.frame(counts= LU_Hist$counts,breaks = LU_Hist$mids)
+
+LU_DF$model<-'SG20'
+
+LU_DF_filter<-LU_DF %>% filter(LU_DF$breaks >= 15)
+LU_DF_filter<-LU_DF_filter %>% filter(LU_DF_filter$breaks <= 125)
+
+Pasture_DF<-rbind(Pasture_DF, LU_DF_filter)
+
+
+
+#ggplot(Crop_DF, aes(breaks, counts, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+
+#ggplot(Crop_DF, aes(breaks, model, height = counts, group = model)) + 
+ # geom_ridgeline()
+
+#modelorder<- c("GCAM", "FAO", "HWSD", "SG17", "SG20")
+#modelcolororder<- c("#9d73bc", "#ADD5FF", "#136839", "#ffc814", "#C63A7C" ) 
+
+PastureDist<-ggplot(Pasture_DF, aes(breaks, model, height = counts, group = model)) + 
+  geom_density_ridges2(fill= "lightgreen", stat = "identity", scale = 3) +
+  theme(axis.title.y = element_blank())+
+  labs(title="I) Pasture SOC Distribution By Model", x = "SOC Mg C/ha")
+
+```
+
+```{r Compiling}
+
+ggarrange(land_use_NO_Leg, legend, cropDist, forestDist, grassDist, shrubDist, urbanDist, RIDDist, PastureDist, ncol=3, nrow=3)

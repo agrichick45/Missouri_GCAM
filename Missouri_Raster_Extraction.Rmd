@@ -1,0 +1,271 @@
+---
+title: "Missouri River Basin Extractions"
+output: html_document
+date: "2024-01-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading the Packages
+
+```{r}
+library(tidyverse)
+library(tidyterra)
+library(terra)
+library(ggpubr)
+```
+
+## Create the Missouri River Basin Shapefile
+```{r}
+
+setwd("C:/Users/aliesch/OneDrive - Environmental Protection Agency (EPA)/Desktop/Boundaries")
+
+boundaries <-vect("reg_basin_boundaries_moirai_landcells_3p1_0p5arcmin.shp")
+
+```
+
+## Load a Raster
+```{r}
+
+setwd("C:/Users/aliesch/OneDrive - Environmental Protection Agency (EPA)/Documents/soilrastercomparison/rasters")
+
+HWSD_full<-rast("HWSD_0-30_Reproj.tif")
+
+HWSD_full <- HWSD_full %>% rename(
+  HWSD = layer
+)
+```
+
+## Reproject the Vector File and Trim it
+```{r}
+newProj <- project(boundaries, HWSD_full, partial = FALSE)
+
+missouri <- subset(newProj, boundaries$basin_nm == "Missouri_River_Basin")
+
+miss_ag <- aggregate(missouri, "basin_id")
+
+writeVector(miss_ag, "C:/Users/aliesch/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/missouri_river_basin.shp")
+
+
+```
+
+## Start the Raster Extraction File
+```{r}
+HWSD_miss <- crop(HWSD_full, miss_ag, snap="near", mask=TRUE, touches=TRUE)
+
+writeRaster(HWSD_miss, "C:/Users/aliesch/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/HWSD_miss.tif", overwrite=TRUE)
+
+FAO_full <- rast("Reproject_FAO_30cm.tif")
+
+FAO_full <- FAO_full %>% rename(
+  FAO = GSOCmap1.6.1
+)
+
+FAO_miss <- crop(FAO_full, miss_ag, snap="near", mask=TRUE, touches=TRUE)
+
+FAO_miss_clamp <- clamp(FAO_miss, 0, 150)
+
+writeRaster(FAO_miss, "C:/Users/aliesch/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/FAO_miss.tif", overwrite=TRUE)
+
+SG2017_full <- rast("SG2017_0_30cm_Reproj.tif")
+
+SG2017_full <- SG2017_full %>% rename(
+  SG2017 = SG2017stocks30cm
+)
+
+SG2017_miss <- crop(SG2017_full, miss_ag, snap="near", mask=TRUE, touches=TRUE)
+
+SG2017_miss_clamp <- clamp(SG2017_miss, 0, 150)
+
+writeRaster(SG2017_miss, "C:/Users/aliesch/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/SG2017_miss.tif", overwrite=TRUE)
+
+SG2020_full <- rast("SoilGrids2020_0-30.tif")
+
+SG2020_full <- SG2020_full %>% rename(
+  SG2020 = 'SoilGrids2020_0-30'
+)
+
+SG2020_miss <- crop(SG2020_full, miss_ag, snap="near", mask=TRUE, touches=TRUE)
+
+SG2020_miss_clamp <- clamp(SG2020_miss, 0, 150)
+
+writeRaster(SG2020_miss, "C:/Users/aliesch/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/SG2020_miss.tif", overwrite=TRUE)
+```
+
+## Create a Raster Stack
+```{r}
+Miss_stack<-c(HWSD_miss, FAO_miss_clamp, SG2017_miss_clamp, SG2020_miss_clamp)
+
+
+Miss_dens <- lapply(names(Miss_stack), function(i) {
+  data.frame(
+    rastername = i,
+    value = as.vector(Miss_stack[[i]])
+  )
+})
+Miss_dens <- do.call(rbind, Miss_dens)
+
+
+
+ggplot(Miss_dens, aes(x = value, fill = rastername)) +
+    geom_density(alpha = 0.3)
+
+#Range is from 0-695
+
+Miss_max <- max(Miss_stack)
+Miss_min <- min(Miss_stack)
+Miss_range <- Miss_max - Miss_min
+Miss_range_custom <- clamp(Miss_range, 0, 100)
+plot(Miss_range_custom, plg=list(labels=c(10,20,30,40,50,"> 60")))
+
+Miss_ratio <- Miss_range/Miss_min
+```
+    
+
+## Load the Land Use Raster
+```{r}
+
+LU_Full <- rast("Reprojected_LandUseRaster_igh.tif")
+
+LU_miss <- crop(LU_Full, miss_ag, snap="near", mask=TRUE, touches=TRUE)
+
+writeRaster(LU_miss, "C:/Users/aliesch/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM/LU_miss.tif")
+
+```
+
+
+```{r}
+#cls <- data.frame(id=1:8, cover=c("Cropland", "Forest", "Grassland", "Shrubland", "Urban", "Rock/Ice/Desert", "Pasture"))
+
+LU_Miss_Crop <- ifel(LU_miss == 1, 1, NA)
+
+Crop_Miss_HWSD <- crop(HWSD_miss, LU_Miss_Crop, snap="near", mask=TRUE, touches=TRUE)
+
+
+Crop_Miss_FAO <- crop(FAO_miss, LU_Miss_Crop, snap="near", mask=TRUE, touches=TRUE)
+
+Crop_Miss_FAO_clamp <- clamp(Crop_Miss_FAO, 0, 150)
+
+Crop_Miss_FAO_dens <- density(Crop_Miss_FAO_clamp)
+
+
+Crop_Miss_SG17 <- crop(SG2017_miss, LU_Miss_Crop, snap="near", mask=TRUE, touches=TRUE)
+
+Crop_Miss_SG17_clamp <- clamp(Crop_Miss_SG17, 0, 150) 
+
+
+Crop_Miss_SG20 <- crop(SG2020_miss, LU_Miss_Crop, snap="near", mask=TRUE, touches=TRUE)
+
+Crop_Miss_SG20_clamp <- clamp(Crop_Miss_SG20, 0, 150)
+
+
+Crop_Miss_stack <- c(Crop_Miss_FAO_clamp, Crop_Miss_HWSD, Crop_Miss_SG17_clamp, Crop_Miss_SG20_clamp)
+
+
+
+crop_dens <- lapply(names(Crop_Miss_stack), function(i) {
+  data.frame(
+    rastername = i,
+    value = as.vector(Crop_Miss_stack[[i]])
+  )
+})
+crop_dens <- do.call(rbind, crop_dens)
+
+crop_dens$lu<-'cropland'
+
+Crop_Miss_Dens<- ggplot(crop_dens, aes(x = value, fill = rastername)) +
+    geom_density(alpha = 0.3)+ 
+  geom_vline(xintercept = 56.7)
+```
+
+
+```{r}
+LU_Miss_Grass <- ifel(LU_miss == 3, 1, NA)
+
+Grass_Miss_HWSD <- crop(HWSD_miss, LU_Miss_Grass, snap="near", mask=TRUE, touches=TRUE)
+
+
+Grass_Miss_FAO <- crop(FAO_miss, LU_Miss_Grass, snap="near", mask=TRUE, touches=TRUE)
+
+Grass_Miss_FAO_clamp <- clamp(Grass_Miss_FAO, 0, 150)
+
+
+Grass_Miss_SG17 <- crop(SG2017_miss, LU_Miss_Grass, snap="near", mask=TRUE, touches=TRUE)
+
+Grass_Miss_SG17_clamp <- clamp(Grass_Miss_SG17, 0, 150)
+
+
+Grass_Miss_SG20 <- crop(SG2020_miss, LU_Miss_Grass, snap="near", mask=TRUE, touches=TRUE)
+Grass_Miss_SG20_clamp <- clamp(Grass_Miss_SG20, 0, 150)
+
+
+Grass_Miss_stack <- c(Grass_Miss_FAO_clamp, Grass_Miss_HWSD, Grass_Miss_SG17_clamp, Grass_Miss_SG20_clamp)
+
+
+grass_dens <- lapply(names(Grass_Miss_stack), function(i) {
+  data.frame(
+    rastername = i,
+    value = as.vector(Grass_Miss_stack[[i]])
+  )
+})
+grass_dens <- do.call(rbind, grass_dens)
+
+grass_dens$lu<-'grassland'
+
+Grass_Miss_Dens <- ggplot(grass_dens, aes(x = value, fill = rastername)) +
+    geom_density(alpha = 0.3)+ 
+  geom_vline(xintercept = 80.0)
+
+```
+
+
+```{r}
+LU_Miss_Pasture <- ifel(LU_miss == 8, 1, NA)
+
+Pasture_Miss_HWSD <- crop(HWSD_miss, LU_Miss_Pasture, snap="near", mask=TRUE, touches=TRUE)
+
+
+Pasture_Miss_FAO <- crop(FAO_miss, LU_Miss_Pasture , snap="near", mask=TRUE, touches=TRUE)
+
+Pasture_Miss_FAO_clamp <- clamp(Pasture_Miss_FAO, 0, 150)
+
+
+Pasture_Miss_SG17 <- crop(SG2017_miss, LU_Miss_Pasture , snap="near", mask=TRUE, touches=TRUE)
+
+Pasture_Miss_SG17_clamp <- clamp(Pasture_Miss_SG17, 0, 150)
+
+
+Pasture_Miss_SG20 <- crop(SG2020_miss, LU_Miss_Pasture , snap="near", mask=TRUE, touches=TRUE)
+
+Pasture_Miss_SG20_clamp <- clamp(Pasture_Miss_SG20, 0, 150)
+
+
+Pasture_Miss_stack <- c(Pasture_Miss_FAO_clamp, Pasture_Miss_HWSD, Pasture_Miss_SG17_clamp, Pasture_Miss_SG20_clamp)
+
+
+Pasture_dens <- lapply(names(Pasture_Miss_stack), function(i) {
+  data.frame(
+    rastername = i,
+    value = as.vector(Pasture_Miss_stack[[i]])
+  )
+})
+Pasture_dens <- do.call(rbind, Pasture_dens)
+
+Pasture_dens$lu<-'pasture'
+
+Pasture_Miss_Dens <- ggplot(Pasture_dens, aes(x = value, fill = rastername)) +
+    geom_density(alpha = 0.3)+ 
+  geom_vline(xintercept = 64.0)
+```
+
+
+#Put Together the Stack
+```{r}
+figure <- ggarrange(Crop_Miss_Dens, Grass_Miss_Dens, Pasture_Miss_Dens,
+                    labels = c("Cropland", "Grassland", "Pasture"),
+                    ncol = 2, nrow = 2)
+figure
+
+```

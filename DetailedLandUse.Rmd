@@ -1,0 +1,257 @@
+---
+title: "Detailed Land Use"
+output: html_document
+date: "2024-09-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+
+```{r Read and Clean}
+setwd("C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM")
+
+DetailedLandUse <- read_csv("DetailedLandUse.csv")
+
+DetailedLandUse$scenario<-NULL
+
+SelectDetailedLU<-select(DetailedLandUse,-c(17:24))
+
+LU<-SelectDetailedLU%>% separate(LandLeaf, c("LandUse", "Basin", "Water", "Input"))
+
+sum_LU<- LU %>% group_by(LandUse) %>% summarise(across(where(is.numeric), sum))
+
+cat_LU<-sum_LU %>% mutate(Category = case_when(
+    LandUse== "biomassGrass" | LandUse=="biomassTree" | LandUse == "FodderGrass" | LandUse == "FodderHerb" | LandUse == "Corn"  | LandUse == "FiberCrop" | LandUse == "MiscCrop" | LandUse == "OilCrop" | LandUse == "OtherArableLand" | LandUse == "OtherGrain" | LandUse=="Rapeseed" | LandUse=="RootTuber" | LandUse=="Soybean" |LandUse=="SugarCrop" | LandUse=="Wheat" ~ "Cropland",
+    LandUse =="Forest" | LandUse =="UnmanagedForest"| LandUse =="ProtectedUnmanagedForest" ~ "Forest", 
+    LandUse =="Grassland" | LandUse=="ProtectedGrassland" ~ "Grassland", 
+    LandUse=="Pasture" | LandUse=="ProtectedUnmanagedPasture" | LandUse=="UnmanagedPasture"~ "Pasture",
+    LandUse=="Shrubland" | LandUse=="ProtectedShrubland" ~ "Shrubland",
+    LandUse=="Tundra" ~ "Tundra",
+    LandUse=="UrbanLand" ~ "Urban"
+
+  )
+)
+
+sum_cat_LU<-cat_LU %>% group_by(Category) %>% summarise(across(where(is.numeric), sum))
+
+long_sum_LU<-sum_cat_LU %>% pivot_longer(!c(Category), names_to="year", values_to = "area")
+
+long_sum_LU$year<-as.numeric(long_sum_LU$year)
+
+long_sum_LU_Year<- long_sum_LU %>% mutate(num_of_obs = case_when(
+  year == 1975 | year == 1990 ~ 15, 
+  year == 2005 | year == 2010 | year == 2015 | year == 2020 | year == 2025 | year == 2030 | year == 2035 | year== 2040 | year == 2045 | year == 2050 | year == 2055 | year == 2060 ~ 5
+))
+
+long_sum_LU_Year_Right <- long_sum_LU_Year %>% mutate(right = case_when(
+  year == 1975 ~ 1990,
+  year == 1990 ~ 2005,
+  year == 2005 ~ 2010,
+  year == 2010 ~ 2015,
+  year == 2015 ~ 2020,
+  year == 2020 ~ 2025,
+  year == 2025 ~ 2030,
+  year == 2030 ~ 2035,
+  year == 2035 ~ 2040,
+  year == 2040 ~ 2045,
+  year == 2045 ~ 2050,
+  year == 2050 ~ 2055,
+  year == 2055 ~ 2060,
+  year == 2060 ~ 2065
+)
+)
+
+long_sum_LU_Year_Right$left <- long_sum_LU_Year_Right$right - long_sum_LU_Year_Right$num_of_obs 
+
+
+
+long_sum_LU_Year_plots <- long_sum_LU_Year_Right %>% 
+  arrange(year) %>% # Order so lowest 'groups' firtst
+  group_by(year) %>% 
+  mutate(yc = cumsum(area), # Calculate position of "top" for every rectangle
+         yc2 = lag(yc, default = 0))
+
+compositeplot<-ggplot(long_sum_LU_Year_plots) +
+  geom_rect(
+    aes(xmin = left, xmax = right,
+        ymin = yc2, ymax = yc,
+        group = Category, fill=Category))+
+  theme(legend.position="bottom",  legend.direction = "horizontal") +
+  labs(y= "Area (thous km2)", x = "Year") +
+  ggtitle(label="A) Missouri Basin Land Use Breakdown") +
+  scale_fill_discrete(name = NULL)
+    
+
+crop_LU<-cat_LU %>% filter(Category=="Cropland")
+
+crop_cat_LU<-crop_LU %>% mutate(Subcategory = case_when(
+    LandUse== "biomassGrass" | LandUse=="biomassTree" | LandUse == "FodderGrass" | LandUse == "FodderHerb" ~ "Biomass/Fodder",
+    LandUse == "Corn" ~ "Corn",
+    LandUse=="Wheat" ~ "Wheat",
+    LandUse=="Soybean" ~ "Soybean",
+      LandUse == "MiscCrop" | LandUse=="RootTuber" | LandUse=="SugarCrop" | LandUse == "FiberCrop" ~ "Misc Crops",
+      LandUse == "OilCrop" | LandUse=="Rapeseed" ~ "Oil Crops",
+      LandUse == "OtherGrain" ~ "Other Grain",
+      LandUse == "OtherArableLand" ~ "Other Arable Land"
+      
+)
+)
+sum_crop_cat_LU<-crop_cat_LU %>% group_by(Subcategory) %>% summarise(across(where(is.numeric), sum))
+
+long_crop_LU<-sum_crop_cat_LU %>% pivot_longer(!c(Subcategory), names_to="year", values_to = "area")
+
+long_crop_LU_Year<- long_crop_LU %>% mutate(num_of_obs = case_when(
+  year == 1975 | year == 1990 ~ 15, 
+  year == 2005 | year == 2010 | year == 2015 | year == 2020 | year == 2025 | year == 2030 | year == 2035 | year== 2040 | year == 2045 | year == 2050 | year == 2055 | year == 2060 ~ 5
+))
+
+long_crop_LU_Year <- long_crop_LU_Year %>% mutate(right = case_when(
+  year == 1975 ~ 1990,
+  year == 1990 ~ 2005,
+  year == 2005 ~ 2010,
+  year == 2010 ~ 2015,
+  year == 2015 ~ 2020,
+  year == 2020 ~ 2025,
+  year == 2025 ~ 2030,
+  year == 2030 ~ 2035,
+  year == 2035 ~ 2040,
+  year == 2040 ~ 2045,
+  year == 2045 ~ 2050,
+  year == 2050 ~ 2055,
+  year == 2055 ~ 2060,
+  year == 2060 ~ 2065
+)
+)
+
+long_crop_LU_Year$left <- long_crop_LU_Year$right - long_crop_LU_Year$num_of_obs 
+
+long_crop_LU_Year <- long_crop_LU_Year %>% 
+  arrange(year) %>% # Order so lowest 'groups' firtst
+  group_by(year) %>% 
+  mutate(yc = cumsum(area), # Calculate position of "top" for every rectangle
+         yc2 = lag(yc, default = 0))
+
+cropplot<-ggplot(long_crop_LU_Year) +
+  geom_rect(
+    aes(xmin = left, xmax = right,
+        ymin = yc2, ymax = yc,
+        group = Subcategory, fill=Subcategory))+
+  theme(legend.position="bottom",  legend.direction = "horizontal") +
+  labs(y= "Area (thous km2)", x = "Year") +
+  ggtitle(label="B) Crop Land Use Breakdown") +
+  scale_fill_discrete(name = NULL)
+
+```
+
+```{r}
+forest_LU<-cat_LU %>% filter(Category=="Forest")
+
+long_forest_LU<-forest_LU %>% pivot_longer(!c(LandUse, Category), names_to="year", values_to = "area")
+
+long_forest_LU_Year<- long_forest_LU %>% mutate(num_of_obs = case_when(
+  year == 1975 | year == 1990 ~ 15, 
+  year == 2005 | year == 2010 | year == 2015 | year == 2020 | year == 2025 | year == 2030 | year == 2035 | year== 2040 | year == 2045 | year == 2050 | year == 2055 | year == 2060 ~ 5
+))
+
+long_forest_LU_Year <- long_forest_LU_Year %>% mutate(right = case_when(
+  year == 1975 ~ 1990,
+  year == 1990 ~ 2005,
+  year == 2005 ~ 2010,
+  year == 2010 ~ 2015,
+  year == 2015 ~ 2020,
+  year == 2020 ~ 2025,
+  year == 2025 ~ 2030,
+  year == 2030 ~ 2035,
+  year == 2035 ~ 2040,
+  year == 2040 ~ 2045,
+  year == 2045 ~ 2050,
+  year == 2050 ~ 2055,
+  year == 2055 ~ 2060,
+  year == 2060 ~ 2065
+)
+)
+
+long_forest_LU_Year$left <- long_forest_LU_Year$right - long_forest_LU_Year$num_of_obs 
+
+
+
+long_forest_LU_Year <- long_forest_LU_Year %>% 
+  arrange(year) %>% # Order so lowest 'groups' firtst
+  group_by(year) %>% 
+  mutate(yc = cumsum(area), # Calculate position of "top" for every rectangle
+         yc2 = lag(yc, default = 0))
+
+forestplot<-ggplot(long_forest_LU_Year) +
+  geom_rect(
+    aes(xmin = left, xmax = right,
+        ymin = yc2, ymax = yc,
+        group = LandUse, fill=LandUse))+
+  theme(legend.position="bottom",  legend.direction = "horizontal") +
+  labs(y= "Area (thous km2)", x = "Year") +
+  ggtitle(label="C) Forest Land Use Breakdown") +
+  scale_fill_discrete(name = NULL, labels = c("Forest", "Protected Forest", "Unmanaged Forest"))
+```
+
+
+
+```{r}
+pasture_LU<-cat_LU %>% filter(Category=="Pasture")
+
+long_pasture_LU<-pasture_LU %>% pivot_longer(!c(LandUse, Category), names_to="year", values_to = "area")
+
+long_pasture_LU_Year<- long_pasture_LU %>% mutate(num_of_obs = case_when(
+  year == 1975 | year == 1990 ~ 15, 
+  year == 2005 | year == 2010 | year == 2015 | year == 2020 | year == 2025 | year == 2030 | year == 2035 | year== 2040 | year == 2045 | year == 2050 | year == 2055 | year == 2060 ~ 5
+))
+
+long_pasture_LU_Year <- long_pasture_LU_Year %>% mutate(right = case_when(
+  year == 1975 ~ 1990,
+  year == 1990 ~ 2005,
+  year == 2005 ~ 2010,
+  year == 2010 ~ 2015,
+  year == 2015 ~ 2020,
+  year == 2020 ~ 2025,
+  year == 2025 ~ 2030,
+  year == 2030 ~ 2035,
+  year == 2035 ~ 2040,
+  year == 2040 ~ 2045,
+  year == 2045 ~ 2050,
+  year == 2050 ~ 2055,
+  year == 2055 ~ 2060,
+  year == 2060 ~ 2065
+)
+)
+
+long_pasture_LU_Year$left <- long_pasture_LU_Year$right - long_pasture_LU_Year$num_of_obs 
+
+
+long_pasture_LU_Year <- long_pasture_LU_Year %>% 
+  arrange(year) %>% # Order so lowest 'groups' firtst
+  group_by(year) %>% 
+  mutate(yc = cumsum(area), # Calculate position of "top" for every rectangle
+         yc2 = lag(yc, default = 0))
+
+pastureplot<-ggplot(long_pasture_LU_Year) +
+  geom_rect(
+    aes(xmin = left, xmax = right,
+        ymin = yc2, ymax = yc,
+        group = LandUse, fill=LandUse)) +
+  theme(legend.position="bottom",  legend.direction = "horizontal") +
+  labs(y= "Area (thous km2)", x = "Year") +
+  ggtitle(label="D) Pasture Land Use Breakdown") +
+  scale_fill_discrete(name = NULL, labels = c("Pasture", "Protected Pasture", "Unmanaged Pasture"))
+
+
+```
+
+
+```{r}
+ggarrange(compositeplot, cropplot, forestplot, pastureplot,
+          ncol = 2, nrow = 2)
+```

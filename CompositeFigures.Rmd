@@ -1,0 +1,2308 @@
+---
+title: "Missouri River Basin Code"
+output: html_document
+author: Mandy Liesch
+email: aliesch@ufl.edu 
+date: "2025-01-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd("C:/Users/ALIESCH/OneDrive - Environmental Protection Agency (EPA)/Desktop/MissouriGCAM")
+
+```
+
+TO DO: 
+- Get customized heights and widths for all of the ggplots
+
+
+## Load Packages
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(tidyterra)
+library(tidyverse)
+library(terra)
+library(exactextractr)
+library(data.table)
+library(htmlTable)
+library(gt)
+library(patchwork)
+library(png)
+library(cowplot)
+library(ggnewscale)
+
+#Identify the folder where soil emissions data are stored
+soilEmissFolder <- "Output"
+
+# Read in the Land Use Data File
+NEW_Land_1700_2060 <- read_csv("NEW_Land_1700_2060.csv")
+
+#load in Vegetative Emissions file
+NEW_AG_Missouri_Emissions <- read_csv("NEW_AG_Missouri_Emissions.csv")
+
+#Reload the land use history file
+newFullHist<-read_csv("fullHistory.csv")
+
+#Load the land use raster file
+LandUse<-rast("Reprojected_LandUseRaster_igh.tif")
+
+#Load the county vector shapefile
+county<-vect("UScounties.shp")
+
+#Pull in the soils raster
+SG2020<-rast("SG2020_miss.tif")
+
+```
+
+## Standardized Color Pallet
+
+### Land Use Color Pallet
+
+```{r}
+LUColors <- c("UrbanLand"="#C80813FF", "Tundra"="#71D0F5FF", 
+              "Rock/Ice/Desert"="#8A9197FF", "Cropland" = "#FED439FF",
+              "HarvCropLand"="#FED439FF", "OtherArableLand" = "#D2AF81FF", 
+              "Pasture"= "#FD8CC1FF", "UnmanagedPasture"="#370335FF", 
+              "Grassland" = "#46732EFF", "Forest" = "#075149FF", 
+              "Shrubland" = "#F05C3BFF", "otherNotArable"="#8A9197FF")
+
+# Vegetative Based Color Pallet
+vegCEmissions<-c("#46732EFF")
+
+ModelColors<- c("FAO"="#370335FF", "Houghton" = "#FED439FF", 
+                "GCAM" = "#FED439FF", "HWSD"="#1A9993FF", "SG17" = "#197EC0FF",
+                "SG20"="#F05C3BFF")
+
+
+```
+
+
+# Creating the Methods Figure
+
+```{r}
+#Set up the class names for the raster
+cls <- data.frame(id=1:8, cover=c("Cropland", "Forest", "Grassland", 
+                                  "Shrubland", "UrbanLand", "Rock/Ice/Desert",  
+                                  "Tundra", "Pasture"))
+#set the values of the land use raster
+levels(LandUse) <- cls
+
+#consolidate the shapefile into states
+neb <- aggregate(county, by='STATE_NAME') %>%
+  #choose the state of Nebraska
+ filter(STATE_NAME == 'Nebraska')
+
+#Project the shapefile to match that of the raster
+Neb_igh<-project(neb, LandUse)
+
+#Crop the shape to Nebraska and drop the NA values
+Neb_LandUse<-crop(LandUse, Neb_igh) %>%
+ drop_na(cover) 
+
+#Create the map of Nebraska Land Use
+nebLU.plt<-ggplot() +
+  #Plot the spatraster
+  geom_spatraster(data=Neb_LandUse)+
+  #Add the title
+  ggtitle("A) Land Use") +
+  #remove the axis titles
+  theme(axis.title.x = element_blank(), axis.title.y = element_blank()) +
+  #Add the color to the custom color pallette
+  scale_fill_manual(values = LUColors, 
+                    #Do not plot the NA Values
+                    na.translate=FALSE, 
+                    #Name the legend
+                    name="Land Use")+
+  #Add the Nebraska shapefile above
+  geom_sf(data=Neb_igh, fill = 'NA', linewidth = 1.5)
+
+#Save the plot as a png
+ggsave(plot=nebLU.plt, filename = "nebLU_plt.png", 
+       #customize the width, height, and dpi
+       width=6.0, height = 2.52, dpi = 300)
+
+#Create a crop land use mask using an ifel statement
+Crop_Mask <- ifel(Neb_LandUse == 1, 1, NA)
+
+#Rename the categorical raster classification names
+clsPast <- data.frame(id=1, cover=c("Cropland"))
+levels(Crop_Mask) <- clsPast
+
+#Create a custom pallette from the custom pallette
+pastCol<- c(LUColors, "NA"=NA)
+
+#Create a cropland plot
+cropland.plt<-ggplot() +
+  #Create a spatraster without a legend
+  geom_spatraster(data=Crop_Mask, show.legend = FALSE) +
+  #Add a title
+  ggtitle("B) Extracted Cropland Mask") +
+  #Use the custom color pallette
+  scale_fill_manual(values=pastCol)+
+  #Add the nebraska shapefile on top
+  geom_sf(data=Neb_igh, fill = 'NA', linewidth = 1.5)
+
+#Save the figure to a .png file
+ggsave(plot=cropland.plt, filename = "cropland_plt.png", 
+       #customize the width and height
+       width=5.04, height = 2.52, dpi = 300)
+
+#crop the file to the state of Nebraska
+Neb_SOC<-crop(SG2020, Neb_igh)
+
+#Mask the SOC file to the crop mask area
+SG2020_Crop<-mask(Neb_SOC, Crop_Mask)
+
+#Create the SOC area for cropland
+soilCrop.plt<-ggplot() +
+  #Graph the spatraster
+  geom_spatraster(data=SG2020_Crop) +
+  #Add a title
+  ggtitle("C) Cropland SOC Values") + 
+  #Add labels
+  labs(fill = "Mg C/ha") +
+  #Adjust the legend to be a bit wider, so it is on the same level 
+  theme(legend.key.width = unit(2, 'cm')) +
+  #use the viridis scale
+  scale_fill_continuous(type = "viridis") +
+  #Add the nebraska shapefile over the top
+  geom_sf(data=Neb_igh, fill = 'NA', linewidth = 1.5)
+
+#Save the plot as a png
+ggsave(plot=soilCrop.plt, filename = "soilCrop_plt.png",
+       #Add the width and height and dpi
+       width=6.0, height = 2.52, dpi = 300)
+
+#extract the soils file to the nebraska shapefile
+maskExtract<-mask(SG2020_Crop, Neb_igh)
+
+#Change the spatvector to a regular shapefile
+Neb_sf<-sf::st_as_sf(Neb_igh)
+
+#Calculate the 3rd quartile value of the soil cropland data
+exact_extract(maskExtract, Neb_sf, "quantile", quantiles=0.75, progress = FALSE)
+
+#Calculate the histograms of the SOC file with 50 breaks
+hist<- terra::hist(maskExtract, breaks=50, maxcell=1500000)
+
+#create a dataframe using the counts and mids
+dat <- data.frame(counts= hist$counts,breaks = hist$mids)
+
+#remove the data above 90 Mg C/ha
+datN<-dat[-c(46:61),]
+#remove the values below 10 Mg C/ha
+datC<-datN[-c(1:6),]
+
+#Create the histogram plot using the customized data frame
+dat.C.plt<-ggplot(datC, aes(x = breaks, y = counts, fill =breaks)) + 
+  #Plot the histogram
+  geom_bar(stat = "identity",fill='black', alpha = 0.5)+
+  #Add the title
+  ggtitle("D) Histogram of Soil Carbon Distribution") +
+  # Add the labels
+  xlab("Soil Bins (Mg C/ha)")+ ylab("Count")+
+  #Set up a custom scale with breaks every 10 Mg/ha between 10 and 90
+  scale_x_continuous(breaks = seq(10,90,10),  
+                   #label these breaks
+                   labels = c(10, 20, 30, 40, 50, 60, 70, 80, 90))  +  
+  #Add the vertical line for the 3rd Quartile
+  geom_vline(xintercept = 57.15, color='red', size=1.5)
+
+#Save the plot as a png
+ggsave(plot=dat.C.plt, filename = "dat_C_plt.png", 
+       #set the width, height, and dpi
+       width=5.04, height = 2.52, dpi = 300)
+
+#use magick to read in all 4 png files
+NEBLandUse<-magick::image_read("nebLU_plt.png")
+#scale all 4 of the pngs to match up with the same height
+NEBLandUse<-magick::image_scale(NEBLandUse, "x180")
+
+histSOC<-magick::image_read("dat_C_plt.png")
+histSOC<-magick::image_scale(histSOC, "x180")
+
+soilCrop<-magick::image_read("soilCrop_plt.png")
+soilCrop<-magick::image_scale(soilCrop, "x180")
+
+cropland<-magick::image_read("cropland_plt.png")
+cropland<-magick::image_scale(cropland, "x180")
+
+#Create the first row of images
+level1<-magick::image_append(c(NEBLandUse, cropland))
+#create the second row of images
+level2<-magick::image_append(c(soilCrop, histSOC))
+
+#Create the rows into stack
+stacked<-c(level1, level2)
+
+#plot the stack
+stacks<-magick::image_append(stacked, stack = TRUE)
+
+stacks
+```
+
+# Arranging the Composite Sum Figure
+
+## Land Use 
+
+```{r}
+#Remove Units  
+NEW_Land_1700_2060<-select(NEW_Land_1700_2060, -c(Units)) %>%
+  #remove all values with NA
+  filter(complete.cases(.))
+
+#Take the wide dataframe and transfer it to long
+long <- NEW_Land_1700_2060 %>% 
+  pivot_longer(
+    #Select the valid years targeted
+    cols = '1700':'2060', 
+    #rename the column transferred to long
+    names_to = "year",
+    #label the area column
+    values_to = "value"
+) %>%
+  #Make sure that year is a numeric variable. 
+  mutate(year = as.numeric(year)) %>%
+  arrange(factor(LandUse, levels = c('Cropland', 'Grassland', 'Pasture', 'Forest',
+                                     'Shurbland', 'OtherNotArable'))) 
+
+
+
+```
+
+```{r}
+#Create the area figure using year, area, and landuse as a fill
+LandUseArea.plt<- ggplot(long, aes(x=year, y=value, fill=LandUse)) + 
+    geom_area() +
+  #Set the legend to be on the bottom
+  theme(legend.position = "bottom")+
+  #Add a title
+  ggtitle("A)Historic and Projected Land Use") +
+  #add the labels
+  labs(fill = "Land Use (Percent)", x='Year', y='Percent Land Area') + 
+  #set the legend to be on one line
+  guides(fill = guide_legend(nrow = 1)) +
+  #Use the custom designed color pallette and set names and labels
+  scale_fill_manual(values=LUColors, name = "Land Use (Percent)", 
+                    labels = c( "Cropland", "Pasture", "Grassland", "Forest", 
+                                "Shrubland", "Other Non Arable"))+
+  #set the values for the x axis and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add vertical values to the graphical axis
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) 
+  
+
+```
+
+## Combined Vegetative Emissions
+
+
+```{r}
+
+#Remove excess columns
+NEW_AG_Missouri_Emissions<-select(NEW_AG_Missouri_Emissions, -c(scenario)) %>%
+  mutate(basin = 'MissouriUSA')
+
+#Group Emissions by basin and add everything up
+sum_LU_veg<-NEW_AG_Missouri_Emissions %>%  
+  group_by(basin) %>% 
+  summarise(across(where(is.numeric), sum))
+
+#Select the model years
+NEW_finalVeg <- sum_LU_veg %>% 
+  select(basin, '1705':'2060')
+
+#Pivot from a wide dataset to a long dataset
+NEWveglong <- NEW_finalVeg %>% 
+  pivot_longer(
+    cols = `1705`:`2060`, 
+    names_to = "year",
+    values_to = "value") %>%
+  #convert the years to numeric
+   mutate(year = as.numeric(year))
+
+
+#plot the vegetative carbon data
+VegTotalEmiss.plt<-ggplot(data=NEWveglong, aes(x=year, y=value, group=1)) +
+  #Utilize the vegetative carbon color defined above
+  geom_line(color=vegCEmissions, linewidth=2) +
+  #add the title
+  ggtitle("B) Historic and Future Vegetative Carbon Emissions") +
+  #Add the labels
+  labs( x='Year', y='Mt CO2 Eqiv/Year') + 
+  #Set the scale and labels for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) 
+
+```
+
+## Combined Soil Carbon 
+
+```{r}
+#Create a series loop to read in all of the data
+
+#Create a list of all .csv files in the output folder
+files <- list.files(path = soilEmissFolder, pattern = "\\.csv$", 
+                    full.names = TRUE)
+
+#Initialize an empty list to store data frames
+data_list <- list()
+
+# Loop over each file and read it into a data frame
+for (file in files) {
+  data <- read.csv(file)
+  data_list[[file]] <- data
+}
+
+# Combine all data frames into one
+combined_soil_data <- bind_rows(data_list)
+
+# Remove the extra columns
+combined_soil_data <- select(combined_soil_data, -c(scenario, region))
+
+#Group everything by series
+sum_LU_soil <-combined_soil_data %>%
+  group_by(Series) %>% 
+  #add everything by series
+  summarise(across(where(is.numeric), sum))
+
+#Select data until 2060
+finalSoil <- sum_LU_soil %>% 
+  select(Series:'X2060')
+
+#Convert the wide dataset to the long dataset
+soillong <- finalSoil %>% 
+  pivot_longer(
+    #Select correct years
+    cols = `X1705`:`X2060`, 
+    names_to = "year",
+    #Change the value names to emissions
+    values_to = "emissions") %>%
+    #Remove the extra X value from the dataset
+    mutate(across(c('year'), substr, 2, nchar(year))) %>%
+    #convert the years to numeric
+    mutate(year = as.numeric(year))
+```
+
+```{r}
+
+#Generate the ggplot with year and emissions as x and y, by series type.
+soilTotalEmiss.plt<-ggplot(data=soillong, 
+                           aes(x=year, y=emissions, group=Series)) +
+  #put the legend on the bottom
+  theme(legend.position = "bottom")+
+  #Create a line plot and made it a bit wider
+  geom_line(aes(color=Series), size=2) +
+  #Add a title
+  ggtitle("C) Historic and Future Soil Carbon in the Missouri River Basin") +
+  #Change the color to match the custom model palette
+  scale_color_manual(values=ModelColors) +
+  #Customize the labels and axis
+  labs(fill = "Soil Model", x='Year', y='Mt CO2 Equiv/Year') + 
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) 
+```
+
+## Composite Figure 1
+
+```{r}
+
+
+#Use the ggpubr to arrage the three figures into a composite
+composite1.plt<-ggarrange(LandUseArea.plt, VegTotalEmiss.plt, 
+                          soilTotalEmiss.plt,
+          #Specify the amount of columns and rows
+          ncol = 1, nrow = 3, 
+          #customize the heights to account for legends necessary
+          heights = c(2, 1.5, 2))
+
+composite1.plt
+```
+
+## Future Overall Projection
+
+```{r}
+#Create the area figure using year, area, and landuse as a fill
+LandUseAreaFuture.plt<- ggplot(long %>%
+                                 filter(year >=2015), 
+                               aes(x=year, y=value, color=LandUse)) + 
+    geom_line(size=2) +
+  #Set the legend to be on the bottom
+  theme(legend.position = "bottom")+
+  #Add a title
+  ggtitle("A)Historic and Projected Land Use") +
+  #add the labels
+  labs(fill = "Land Use (Percent)", x='Year', y='Percent Land Area') + 
+  #set the legend to be on one line
+  guides(fill = guide_legend(nrow = 1)) +
+  #Use the custom designed color pallette and set names and labels
+  scale_color_manual(values=LUColors, name = "Land Use (Percent)", 
+                    labels = c( "Cropland", "Grassland", "Forest", "Pasture", 
+                                "Shrubland", "Other Not Arable")) +
+  #Add the legend at the bottom
+  theme(legend.position='bottom')
+
+```
+
+## Vegetation Breakdown
+
+```{r}
+
+
+#Do a final reclassification with the new forest definition
+newFullName<- newFullHist %>% 
+  mutate(LandUse = case_when(
+    Category == "HarvCropLand" ~ "HarvCropLand",
+    Category == "OtherArableLand" ~"OtherArableLand",
+    Category %in% c("Forest", "UnmanagedForest")~ "Forest",
+    Category =="Grassland" ~ "Grassland", 
+    Category=="Pasture" ~ "Pasture",
+    Category=="UnmanagedPasture"~ "UnmanagedPasture",
+    Category=="Shrubland" ~ "Shrubland",
+    Category=="Tundra" ~ "Tundra",
+    Category=="UrbanLand" ~ "UrbanLand"
+  )
+)
+
+#Resummarize the values by the new land use categories
+land_sum_cat_LU<-newFullName %>% 
+  group_by(LandUse) %>% 
+  #Sum everything that needs to happen
+  summarise(across(where(is.numeric), sum)) %>%
+  #remove all values with NA
+  filter(complete.cases(.))
+  
+
+#Pivot the tables to the long values
+newLongHist<- land_sum_cat_LU %>% 
+  pivot_longer(!c(LandUse), names_to="year", values_to = "area") %>%
+  #Rename the column to category
+  rename(Category = LandUse)
+```
+
+
+## Vegetation by Land Use Breakdown
+
+```{r}
+#Break up the land leaf columns into subsets 
+#(each land leaf has 4 different categories)
+NA_MO_Veg<-NEW_AG_Missouri_Emissions%>% 
+  separate(LandLeaf, c("LandUse", "Basin", "Water", "Input"))
+
+
+#Sum together all of the land leaf files by land use type
+sum_NA_MO_Veg<- NA_MO_Veg %>% 
+  group_by(LandUse) %>% 
+  summarise(across(where(is.numeric), sum))
+
+#Reclassify land use types into broader categories
+veg_cat_LU<-sum_NA_MO_Veg %>% mutate(Category = case_when(
+  #Cropland category  
+  LandUse %in% 
+    #Biomass Crops
+    c("biomassGrass", "biomassTree",  
+    #Fodder Crops
+      "FodderGrass", "FodderHerb", 
+    #Grain Crops
+      "Corn",  "Soybean", "Wheat", "OtherGrain",
+    #Oil Crops
+      "OilCrop", "Rapeseed", 
+    #Other Crops
+      "FiberCrop", "MiscCrop", "RootTuber",  "SugarCrop") 
+    #Land Use Name
+      ~ "HarvCropLand",
+    #Other Arable Land
+    LandUse == "OtherArableLand" ~"OtherArableLand",
+    #Forest categories
+    LandUse %in% c("Forest", "UnmanagedForest", "ProtectedUnmanagedForest")
+                ~ "Forest",
+    #Grassland categories
+    LandUse %in% c("Grassland", "ProtectedGrassland") ~ "Grassland", 
+    #Pasture category
+    LandUse=="Pasture" ~ "Pasture",
+    #Unamanged pasture category
+    LandUse %in% c("ProtectedUnmanagedPasture", "UnmanagedPasture") 
+              ~ "UnmanagedPasture",
+    #Shrubland category
+    LandUse %in% c("Shrubland", "ProtectedShrubland") ~ "Shrubland",
+    #Other categories
+    LandUse=="Tundra" ~ "Tundra",
+    LandUse=="UrbanLand" ~ "UrbanLand",
+    #Default Return Statement
+    TRUE~NA_character_
+  )
+)
+
+#Sum everything up by defined land use category
+veg_sum_cat_LU<-veg_cat_LU %>% 
+  group_by(Category) %>% 
+  summarise(across(where(is.numeric), sum))
+
+#Create a long dataframe with land use, years, and emissions rate
+veg_long_sum_LU<-veg_sum_cat_LU %>% 
+  pivot_longer(!c(Category), names_to="year", values_to = "emissions") %>%
+  #convert years into the numeric values
+  mutate(year = as.numeric(year))
+
+#Add the area "Area (thous km2)", to the emissions in (Mt CO2 Equiv/Year)
+new_veg<-merge(newLongHist, veg_long_sum_LU, all=TRUE)
+
+#Filter out the years required
+new_veg_filter<- new_veg %>% 
+  filter(year>= '1705'&year<='2060') %>%
+  #Fill in the emissions values that are missing (1898, 1899, 1900)
+  fill(emissions) %>%
+  #multiply emissions by 1000
+  mutate(kg = emissions*1000) %>%
+  #calculate density 
+  mutate(density =kg/area) %>%
+  #convert years into the numeric values
+  mutate(year = as.numeric(year))
+
+
+#Create a spaghetti plot of land use area using area by category
+landUseLines.plt<-ggplot(data= new_veg_filter, 
+                         aes(x=year, y=area, group=Category))+
+  geom_line(aes(color=Category), size=2) +
+  #add a title
+  ggtitle("A) Historic and Future Area by Land Use Type") +
+  #add labels
+  labs( x='Year', y='Land Area (thous sq km)') +
+  #use the custom color pallette
+  scale_color_manual(values=LUColors) +
+  #Fix the x scale and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #remove the legend
+  theme(legend.position = "none")
+
+
+#Calculate vegetative emissions graph by land use
+vegEmissLU.plt<-ggplot(data= new_veg_filter, aes(x=year, y=emissions, 
+                                              group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add the titles 
+  ggtitle("B) Historic and Future Vegetative Emissions by Land Use Type") +
+  #Add the labels
+  labs( x='Year', y='Annual Emissions (Mt/year)') + 
+  #Utilize the custom color scale and create the labels and spacing for 
+  #words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #scale and label the x axis breaks
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #add the legend at the bottom
+  theme(legend.position = "none")
+```
+
+## Calculate the vegetative denisty by Land Use Type
+
+```{r}
+#create the density plots for land use by year
+vegDensity.plt<-ggplot(data= new_veg_filter, aes(x=year, y=density, 
+                                         group=Category, color=Category))+
+  geom_line(size=2) +
+  #add a title
+  ggtitle("C. Historic and Future Vegetative Emissions Rate of Change by Land Use Type") +
+  #add labels
+  labs( x='Year', y='Annualized Density (kg/thous sq km/Year)') +
+  #use custom color and labels 
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #customize the x axis breaks and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #but the legend on the bottom
+  theme(legend.position="bottom")
+
+```
+
+
+## Change in Vegetative Emissions and Density
+
+```{r}
+compVegEmiss.plt<-ggarrange(landUseLines.plt, vegEmissLU.plt, vegDensity.plt,
+          ncol = 1, nrow = 3,
+          heights = c(2, 2, 3))
+
+compVegEmiss.plt
+
+```
+
+
+## Future Emissions
+
+```{r}
+#Create a spaghetti plot of land use area using area by category
+landUseFuture.plt<-ggplot(data= new_veg_filter %>% 
+                            #Filter by future years
+                            filter(year>=2015), 
+                            #customize your data
+                            aes(x=year, y=area, 
+                                group=Category, fill=Category))+
+  #Plot a line plot
+  geom_line(aes(color=Category), size=2) +
+  #add a title
+  ggtitle("A) Future Area in by Land Use Type") +
+  #add labels
+  labs( x='Year', y='Land Area (thous sq km)') +
+  #use the custom color pallette
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Add a legend
+  theme(legend.position = "none")
+
+#Calculate vegetative emissions graph by land use
+vegEmissLUFuture.plt<-ggplot(data= new_veg_filter %>% 
+                             #filter by year
+                             filter(year>=2015), 
+                             #Customize the colors
+                             aes(x=year, y=emissions, 
+                            group=Category, color=Category))+
+  #add the lines
+  geom_line(size=2) +
+  #Add the titles 
+  ggtitle("B) Future Vegetative Emissions by Land Use Type") +
+  #Add the labels
+  labs( x='Year', y='Annual Emissions (Mt/year)') + 
+  #Utilize the custom color scale and create the labels and spacing for 
+  #words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land"))+
+  #Add the legend on the bottom
+  theme(legend.position = "none")
+
+vegDensityFuture.plt<-ggplot(data= new_veg_filter %>% 
+                               #Customize the future
+                               filter(year>=2015), 
+                               #Customize the plots
+                               aes(x=year, y=density,
+                               group=Category, color=Category))+
+  #add the line plots
+  geom_line(size=2) +
+  #add a title
+  ggtitle("C. Historic and Future Vegetative Emissions Rate of Change by Land Use Type") +
+  #add labels
+  labs( x='Year', y='Annualized Density (kg/thous sq km/Year)') +
+  #use custom color and labels 
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Put the legend on the bottom
+  theme(legend.position = "bottom")
+
+
+```
+
+
+## Composite Future Vegetative Emissions
+
+```{r}
+#Put the entire plot together
+compVegEmissFuture.plt<-ggarrange(landUseFuture.plt, vegEmissLUFuture.plt, vegDensityFuture.plt,
+          #Customize the columns and rows
+          ncol = 1, nrow = 3,
+          #customize the height ratios
+          heights = c(2, 2, 3))
+
+compVegEmissFuture.plt
+
+```
+
+## Soil Emissions by Land Use by Model
+
+```{r}
+#Separate the LandLeaf series into four columns
+NA_MO_Soil<-combined_soil_data %>% 
+  separate(LandLeaf, c("LandUse", "Basin", "Water", "Input"))
+
+#Sum by the soil data source type AND land uses
+sum_NA_MO_Soil<- NA_MO_Soil %>% 
+  group_by(Series, LandUse) %>%
+  summarise(across(where(is.numeric), sum))
+
+#Recategorize the land use types into condensed categories
+soil_cat_LU<-sum_NA_MO_Soil %>% 
+  mutate(Category = case_when(
+#Cropland category  
+  LandUse %in% 
+    #Biomass Crops
+    c("biomassGrass", "biomassTree",  
+    #Fodder Crops
+      "FodderGrass", "FodderHerb", 
+    #Grain Crops
+      "Corn",  "Soybean", "Wheat", "OtherGrain",
+    #Oil Crops
+      "OilCrop", "Rapeseed", 
+    #Other Crops
+      "FiberCrop", "MiscCrop", "RootTuber",  "SugarCrop") 
+    #Land Use Name
+      ~ "HarvCropLand",
+    #Other Arable Land
+    LandUse == "OtherArableLand" ~"OtherArableLand",
+    #Forest categories
+    LandUse %in% c("Forest", "UnmanagedForest", "ProtectedUnmanagedForest")
+                ~ "Forest",
+    #Grassland categories
+    LandUse %in% c("Grassland", "ProtectedGrassland") ~ "Grassland", 
+    #Pasture category
+    LandUse=="Pasture" ~ "Pasture",
+    #Unamanged pasture category
+    LandUse %in% c("ProtectedUnmanagedPasture", "UnmanagedPasture") 
+              ~ "UnmanagedPasture",
+    #Shrubland category
+    LandUse %in% c("Shrubland", "ProtectedShrubland") ~ "Shrubland",
+    #Other categories
+    LandUse=="Tundra" ~ "Tundra",
+    LandUse=="UrbanLand" ~ "UrbanLand",
+    #Default Return Statement
+    TRUE~NA_character_
+  )
+)
+
+#Re-summarize by the newly defined categories
+soil_sum_cat_LU<-soil_cat_LU %>% 
+  group_by(Series, Category) %>% 
+  summarise(across(where(is.numeric), sum))
+
+#Create the long values from the wide column
+soil_long_sum_LU<-soil_sum_cat_LU %>% 
+  pivot_longer(!c(Series, Category), names_to="year", 
+               values_to = "emissions") %>%
+    #Remove the extra X value from the dataset
+    mutate(across(c('year'), substr, 2, nchar(year))) 
+
+
+#Merge the land use variables to the soil values
+new_soil<-merge(newLongHist, soil_long_sum_LU, all=TRUE)
+
+
+new_soil_filter<- new_soil %>% 
+  filter(year>= '1705'&year<='2060') %>%
+  #multiply emissions by 1000
+  mutate(kg = emissions*1000) %>%
+  #calculate density 
+  mutate(density =kg/area) %>%
+  #convert the years to numeric
+  mutate(year = as.numeric(year))
+
+```
+
+## FAO Soil Data Extraction
+
+```{r}
+#Select the FAO based data
+FAO_soil<- new_soil_filter  %>% filter(Series == 'FAO')
+
+#Plot the Land Use using the year and area by land use type
+landUseFAO.plt<-ggplot(data= FAO_soil, aes(x=year, y=area, 
+                                           group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Land Use in the Missouri River Basin") +
+  #Add labels
+  labs( x='Year', y='Land Area (thous sq km)') + 
+  #Utilize the custom color scale and create the labels and spacing for
+  #the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Set scale and label the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #remove the legend
+  theme(legend.position = "none")
+```
+
+## FAO Emissions and Density
+
+```{r}
+#Create the FAO Soil Emissions Plots
+soilEmissFAO.plt<-ggplot(data= FAO_soil, aes(x=year, y=emissions, 
+                                             group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("FAO Glosis Emissions") +
+  #Add labels
+  labs( x='Year', y='Annual Emissions (Mt/year)') + 
+  #Utilize the custom color scale and create the labels and spacing 
+  #for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Scale and label the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #scale and label the y axis
+  scale_y_continuous(breaks=c(-90, -60, -30, 0, 30, 60, 90)) +
+  ylim(-110, 90) +
+  #add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #remove the axis title and legend
+  theme(axis.title.y = element_blank(),
+    legend.position = "none") 
+  
+
+#create a density plot for FAO
+soilDensFAO.plt<-ggplot(data= FAO_soil, aes(x=year, y=density, 
+                                       group=Category, color=Category))+
+  geom_line(size=2) +
+  #add title
+  ggtitle("FAO Glosis Density") +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #add labels to the plot
+  labs( x='Year', y='(kg/thous sq km/Year)') +
+  #add the scale and labels for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  theme(legend.position="bottom") +
+  ylim(-1000, 2000)
+
+```
+
+## Houghton Emissions and Density
+
+```{r}
+#Repeat for Houghton Data
+GCAM_soil<- new_soil_filter %>% 
+  filter(Series == 'Houghton')
+
+#Calculate the emissions for each land use type
+soilEmissGCAM.plt<-ggplot(data= GCAM_soil, aes(x=year, y=emissions, 
+                                           group=Category, color=Category))+
+  geom_line(size=2) +
+  #add the title
+  ggtitle("Houghton Emissions") +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Add the labels
+  labs( x='Year', y='Annual Emissions (Mt/year)') + 
+  #Add the scale and labels for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the scale and labels of the y axis
+  scale_y_continuous(breaks=c(-90, -60, -30, 0, 30, 60, 90)) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #remove the legend
+  theme(
+    axis.title.y = element_blank(),
+    legend.position = "none") +
+  ylim(-110, 90)
+
+#Create the density plots for GCAM land use
+soilDensGCAM.plt<-ggplot(data= GCAM_soil, aes(x=year, y=density, 
+                                         group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add a title
+  ggtitle("Houghton") +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #add the labels
+  labs( x='Year', y='(kg/thous sq km/Year)') +
+  #add the scale and labels for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  theme(legend.position="none")+
+  ylim(-1000, 2000)
+
+```
+
+## HWSD Emissions and Density
+
+```{r}
+#Repeat with the HWSD Database
+HWSD_soil<- new_soil_filter  %>% 
+  filter(Series == "HWSD")
+
+#Create emissions graph using land use
+soilEmissHWSD.plt<-ggplot(data= HWSD_soil, aes(x=year, y=emissions, 
+                                           group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add a title
+  ggtitle("Harmonized World Soils Database") +
+  #Add labels
+  labs( x='Year', y='Annual Emissions (Mt/year)') + 
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Adjust the scale and labels for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the scale and breaks for the y axis
+  scale_y_continuous(breaks=c(-90, -60, -30, 0, 30, 60, 90)) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #remove the legend
+  theme(
+    axis.title.y = element_blank(),
+    legend.position = "none") +
+  #customize the y axis
+  ylim(-110, 90)
+
+#Calculate the density function
+soilDensHWSD.plt<-ggplot(data= HWSD_soil, aes(x=year, y=density, 
+                                         group=Category, color=Category))+
+  geom_line(size=2) +
+  #add a title
+  ggtitle("Harmonized World Soils Database") +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #add labels to the plot
+  labs( x='Year', y='(kg/thous sq km/Year)') +
+  #scale and label the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #remove the legends
+  theme(legend.position="none")+
+  ylim(-1000, 2000)
+
+```
+
+## SG17 Emissions and Density
+
+```{r}
+#Repeat for SoilGrids 17
+SG17_soil<- new_soil_filter  %>% 
+  filter(Series == "SG17")
+
+#Create the emissions graph by land use
+soilEmissSG17.plt<-ggplot(data= SG17_soil, aes(x=year, y=emissions, 
+                                           group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add a title
+  ggtitle("SoilGrids 2017 Emissions") +
+  #Add the labels
+  labs( x='Year', y='Annual Emissions (Mt/year)') + 
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Add x axis values and scales
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Set and scale the y axis
+  scale_y_continuous(breaks=c(-90, -60, -30, 0, 30, 60, 90)) +
+  #Add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #Add custom theme elements
+  theme(
+    axis.title.y = element_blank(),
+    legend.position = "none") +
+  ylim(-110, 90)
+
+
+soilDensSG17.plt<-ggplot(data= SG17_soil, aes(x=year, y=density, 
+                                         group=Category, color=Category))+
+  geom_line(size=2) +
+  #add a title
+  ggtitle("SoilGrids 2017") +
+  #Add labels
+  labs( x='Year', y='(kg/thous sq km/Year)') +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Add scales and breaks to the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  theme(legend.position="none")+
+  ylim(-1000, 2000)
+
+```
+
+## SG20 Emissions and Density
+
+```{r}
+#Repeat for SG 2020
+SG20_soil<- new_soil_filter  %>% 
+  filter(Series == "SG20")
+
+#Pull out the emissions by land use
+soilEmissSG20.plt<-ggplot(data= SG20_soil, aes(x=year, y=emissions, 
+                                           group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add a title
+  ggtitle("SoilGrids 2020") +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Add labels
+  labs( x='Year', y='Annual Emissions (Mt/year)') + 
+  #Customize the x axis and breaks
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #put the y axis on the scale
+  scale_y_continuous(breaks=c(-90, -60, -30, 0, 30, 60, 90)) +
+  #add vertical lines
+   geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #guides(color = guide_legend(ncol = 2)) +
+  theme(
+    axis.title.y = element_blank(),
+    legend.position = "none") +
+  ylim(-110, 90)
+
+
+
+#Calculate the density
+soilDensSG20.plt<-ggplot(data= SG20_soil, aes(x=year, y=density, 
+                                         group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add a title
+  ggtitle("SoilGrids 2020") +
+  #Add labels
+  labs( x='Year', y='(kg/thous sq km/Year)') +  
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Scale and label the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  theme(legend.position="none") +
+  ylim(-1000, 2000)
+```
+
+
+## Land Use Legend
+
+```{r}
+#Create a legend for land uses with the SG2020 data
+emissionsLULegend<-ggplot(data= SG20_soil, aes(x=year, y=emissions, 
+                                               group=Category, color=Category))+
+  geom_line(size=2) +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Make the legend 2 columns
+  guides(color = guide_legend(ncol = 2)) +
+  #Right Justify it
+  theme(legend.position = "right") 
+
+#Isolate the legend 
+legLU <- get_legend(emissionsLULegend)
+#Save it as a ggplot
+LUleg<-as_ggplot(legLU)
+```
+
+## Composite Soil Emissions Figures
+
+```{r}
+#Create the composite Emissions figure with Land Use, and emissions
+compositeSoilEmissions<-ggarrange(landUseFAO.plt, soilEmissFAO.plt, 
+                                  soilEmissGCAM.plt, soilEmissHWSD.plt, 
+                                  soilEmissSG17.plt, soilEmissSG20.plt, 
+#columns and rows
+ncol=2, nrow=3, 
+#Add a common legend at the bottom of the figure
+common.legend = TRUE, legend="bottom")
+
+#Plot the composite emissions figure
+compositeSoilEmissions
+```
+
+## Composite Density Figures
+
+```{r}
+#Create a composite plot for the Density figures
+compositeSoilDensity.plt<-ggarrange(landUseFAO.plt, soilDensFAO.plt, 
+                                soilDensGCAM.plt, soilDensHWSD.plt, 
+                                soilDensSG17.plt, soilDensSG20.plt, 
+#Utilize two columns and three rows                            
+ncol=2, nrow=3, 
+#Place a common legend on the bottom
+common.legend = TRUE, legend="bottom")
+
+#plot the density
+compositeSoilDensity.plt
+
+```
+
+## Soil Model Emissions by Land Use Type
+
+### Model Legend
+
+```{r}
+#Isolate the forest soils
+Forest_soil<- new_soil_filter  %>% 
+  filter(Category == 'Forest')
+
+#Create the emissions model
+emissionsModelLegend<-ggplot(data= Forest_soil, aes(x=year, y=emissions, group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the manual color scale for different models
+   scale_color_manual(values=ModelColors, name="Soil Carbon Source", labels = c("FAO Glosis", "Houghton", "Harmonized World Soils Database", "SoilGrids 2017", "SoilGrids 2020"))
+
+#Get the legend
+legModels <- get_legend(emissionsModelLegend)
+#Transform the legend into a ggplot
+Modelleg<-as_ggplot(legModels)
+
+```
+
+## Emissions by Land Use Type
+
+```{r}
+#Isolate the forest soils
+Forest_soil<- new_soil_filter  %>% 
+  filter(Category == 'Forest')
+
+#Create an emissions line plot by soil raster
+soilEmissForest.plt<-ggplot(data= Forest_soil, aes(x=year, y=emissions, 
+                                                   group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Forest Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Drop in the custom model color pallette and labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #Customize the x raster
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #Remove the legend and element titles
+  theme(legend.position = "none",
+        axis.title.y=element_blank())
+
+#isolate the grassland soils
+grassland_soil<- new_soil_filter %>% 
+  filter(Category == 'Grassland')
+
+#create the grassland emissions plots
+soilEmissGrassland.plt<-ggplot(data= grassland_soil, aes(x=year, y=emissions, 
+                                                     group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Grassland Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Add the custom color scale and legend labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #Add the x scale and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #Remove the legend and y label
+  theme(legend.position = "none",
+        axis.title.y=element_blank())
+
+#isolate the pasture soils
+pasture_soil<- new_soil_filter %>% 
+  filter(Category == 'Pasture')
+
+#set up the pasture emissions line plot
+soilEmissPasture.plt<-ggplot(data= pasture_soil, aes(x=year, y=emissions, 
+                                                 group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Pasture Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Add the color scale and custom labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #Add the options to customize the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #Remove the legend
+  theme(legend.position = "none",
+        #Remove the axis titles
+        axis.title.y=element_blank())
+
+#Isolate the unmanaged pasture soil
+unmanagedpasture_soil<- new_soil_filter  %>% 
+  filter(Category == 'UnmanagedPasture')
+
+#Create the line plot for unmanaged pasture
+soilEmissUnmanPasture.plt<-ggplot(data= unmanagedpasture_soil, 
+                                  aes(x=year, y=emissions, group=Series, 
+                                      color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Unmanaged Pasture Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Add the custom color scale and labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #customize the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #Remove the legend
+  theme(legend.position = "none",
+        #Remove the y axis labels
+        axis.title.y=element_blank())
+
+#Isolate other Arable Land
+otherAL_soil<- new_soil_filter  %>% 
+  filter(Category == 'OtherArableLand')
+
+#Plot the emissions line plot by series
+soilEmissOAL.plt<-ggplot(data= otherAL_soil, aes(x=year, y=emissions, 
+                                                 group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Other Arable Land Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Add the custom color scale and labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #customize the x axis scale
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #remove the legend
+  theme(legend.position = "none",
+        #Remove the y axis title
+        axis.title.y=element_blank())
+
+#isolate the harvested cropland
+HarvCrop_soil<- new_soil_filter %>% 
+  filter(Category == 'HarvCropLand')
+
+#create the emissions line graph
+soilEmissHarvCrop.plt<-ggplot(data= HarvCrop_soil, aes(x=year, y=emissions, 
+                                                group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Harvested Cropland Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #add the custom color and labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database",
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #Add the x axis scales
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #Remove the legend
+  theme(legend.position = "none",
+        #remove the y axis title
+        axis.title.y=element_blank()) 
+
+#Isolate the shrubland emissions
+shrubland_soil<- new_soil_filter  %>% 
+  filter(Category == 'Shrubland')
+
+#Create the line graph for shrubland by model type
+soilEmissionsShrub.plt<-ggplot(data= shrubland_soil, aes(x=year, y=emissions, 
+                                                  group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Shrubland Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Add the custom color scales and labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #Add the scales for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) +
+  #remove the legend
+  theme(legend.position = "none",
+        #Remove the y axis title
+        axis.title.y=element_blank()) 
+```
+
+## Composite Soil Land Use Emissions Plot
+
+```{r}
+#put the model based land use emissions model together with the custom legend
+SoilLUEmissions<-ggarrange(soilEmissForest.plt, soilEmissGrassland.plt, 
+                           soilEmissPasture.plt, soilEmissUnmanPasture.plt,
+                           soilEmissOAL.plt, soilEmissHarvCrop.plt, 
+                           soilEmissionsShrub.plt, legModels, 
+  #Two columns and 4 rows
+  ncol = 2, nrow=4)
+
+
+#Add the external framework to the diagram
+annotate_figure(SoilLUEmissions, 
+    #Add a title to the entire plot
+    top=text_grob("Soil Emissions from Major Land Use Types"), 
+    #Add the label on the left side and rotate it
+    left = text_grob("Annual Soil Emissions (Mt/year)",  rot = 90))
+```
+
+
+## FAO Emissions and Density Subset
+
+```{r}
+#utilize the FAO data to create an example of land use, emissions, and density
+soilcompFAO.plt<-ggarrange(landUseFAO.plt, soilEmissFAO.plt, soilDensFAO.plt, 
+                           #add columns and rows
+                           ncol = 1, nrow = 3,
+                           #and custom heights
+                          heights = c(2, 2, 3))
+
+soilcompFAO.plt
+
+```
+
+
+## Future Density Emissions
+```{r}
+
+#create a density plot for FAO
+soilFutDensFAO.plt<-ggplot(data= FAO_soil %>% 
+                          filter(year>2015), aes(x=year, y=density, 
+                                       group=Category, color=Category))+
+  geom_line(size=2) +
+  #add title
+  ggtitle("FAO Glosis Density") +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #add labels to the plot
+  labs( x='Year', y='(kg/thous sq km/Year)') +
+  #add the scale and labels for the x axis
+  theme(legend.position="none") +
+  ylim(-130, 330)
+
+
+#Create the density plots for GCAM land use
+soilFutDensGCAM.plt<-ggplot(data= GCAM_soil%>%
+                              filter(year>2015), aes(x=year, y=density, 
+                                         group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add a title
+  ggtitle("Houghton") +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #add the labels
+  labs( x='Year', y='(kg/thous sq km/Year)') +
+  theme(legend.position="none") +
+  ylim(-130, 330)
+
+
+#Calculate the density function
+soilFutDensHWSD.plt<-ggplot(data= HWSD_soil %>%
+                              filter(year >2015), aes(x=year, y=density, 
+                                         group=Category, color=Category))+
+  geom_line(size=2) +
+  #add a title
+  ggtitle("Harmonized World Soils Database") +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #add labels to the plot
+  labs( x='Year', y='(kg/thous sq km/Year)') +
+  theme(legend.position="none") +
+  ylim(-130, 330)
+
+
+soilFutDensSG17.plt<-ggplot(data= SG17_soil %>%
+                              filter(year>2015), aes(x=year, y=density, 
+                                         group=Category, color=Category))+
+  geom_line(size=2) +
+  #add a title
+  ggtitle("SoilGrids 2017") +
+  #Add labels
+  labs( x='Year', y='(kg/thous sq km/Year)') +
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  theme(legend.position="none") +
+  ylim(-130, 330)
+
+#Calculate the density
+soilFutDensSG20.plt<-ggplot(data= SG20_soil %>%
+                           filter(year>2015), aes(x=year, y=density, 
+                                         group=Category, color=Category))+
+  geom_line(size=2) +
+  #Add a title
+  ggtitle("SoilGrids 2020") +
+  #Add labels
+  labs( x='Year', y='(kg/thous sq km/Year)') +  
+  #Utilize the custom color scale and create the labels and 
+  #spacing for the words in the legend
+  scale_color_manual(values=LUColors, name = "Land Use", 
+                     labels = c( "Forest", "Grassland", "Harvested Cropland", 
+                                 "Other Arable Land", "Pasture", "Shrubland", 
+                                 "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  theme(legend.position="none") +
+  ylim(-130, 330)
+```
+
+
+## Future Density Composite
+```{r}
+#Create the future soil density composite image
+futDensComp.plt<-ggarrange(soilFutDensFAO.plt, soilFutDensGCAM.plt, 
+                       soilFutDensHWSD.plt, soilFutDensSG17.plt, 
+                       soilFutDensSG20.plt, legLU, 
+                       #Set the columns and rows
+                       nrow = 3, ncol=2)
+
+```
+
+
+## Future Soil Emissions by Model
+
+```{r}
+soilEmissForestFut.plt<-ggplot(data= Forest_soil %>%
+                                 filter(year>2015), aes(x=year, y=emissions, 
+                                                   group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Forest Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Drop in the custom model color pallette and labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #Remove the legend and element titles
+  theme(legend.position = "none",
+        axis.title.y=element_blank())
+
+#create the grassland emissions plots
+soilEmissGrassFut.plt<-ggplot(data= grassland_soil %>%
+                                 filter(year>2015), aes(x=year, y=emissions, 
+                                                  group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Grassland Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Add the custom color scale and legend labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #remove the legends and axis titles
+  theme(legend.position = "none",
+        axis.title.y=element_blank())
+
+#set up the pasture emissions line plot
+soilEmissPastFut.plt<-ggplot(data= pasture_soil %>%
+                               filter(year>2015), aes(x=year, y=emissions, 
+                                                 group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Pasture Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Add the color scale and custom labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  theme(legend.position = "none",
+      #Remove the y axis title
+      axis.title.y=element_blank())
+
+
+#Create the line plot for unmanaged pasture
+soilEmissUnmanFut.plt<-ggplot(data= unmanagedpasture_soil %>%
+                                    filter(year>2015), 
+                                  aes(x=year, y=emissions, group=Series, 
+                                      color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Unmanaged Pasture Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Add the custom color scale and labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  theme(legend.position = "none",
+      #Remove the y axis title
+      axis.title.y=element_blank())
+
+#Plot the emissions line plot by series
+soilEmissOALFut.plt<-ggplot(data= otherAL_soil %>%
+                              filter(year>2015), aes(x=year, y=emissions, 
+                                                 group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Other Arable Land Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Add the custom color scale and labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  theme(legend.position = "none",
+        #Remove the y axis title
+        axis.title.y=element_blank())
+
+#create the emissions line graph
+soilEmissHarvCropFut.plt<-ggplot(data= HarvCrop_soil %>% 
+                                   filter(year>2015), 
+                                 aes(x=year, y=emissions, 
+                                                group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Harvested Cropland Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #add the custom color and labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database",
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #Remove the legend
+  theme(legend.position = "none",
+        #remove the y axis title
+        axis.title.y=element_blank()) 
+
+
+#Create the line graph for shrubland by model type
+soilEmissionsShrubFut.plt<-ggplot(data= shrubland_soil %>%
+                                    filter(year>2015), aes(x=year, y=emissions, 
+                                                  group=Series, color=Series))+
+  geom_line(size=2) +
+  #Add the title
+  ggtitle("Shrubland Soils") +
+  #Add the labels
+  labs( x='Year', y='(Mt/year)') + 
+  #Add the custom color scales and labels
+  scale_color_manual(values=ModelColors, name="Soil Carbon Source", 
+                     labels = c("FAO Glosis", "Houghton", 
+                                "Harmonized World Soils Database", 
+                                "SoilGrids 2017", "SoilGrids 2020")) +
+  #remove the legend
+  theme(legend.position = "none",
+        #Remove the y axis title
+        axis.title.y=element_blank()) 
+```
+
+## Composite Soil Land Use Emissions
+
+```{r}
+
+#put the model based land use emissions model together with the custom legend
+SoilLUEmissFut.plt<-ggarrange(soilEmissForestFut.plt, soilEmissGrassFut.plt, 
+                           soilEmissPastFut.plt, soilEmissUnmanFut.plt,
+                           soilEmissOALFut.plt, soilEmissHarvCropFut.plt, 
+                           soilEmissionsShrubFut.plt, legModels, 
+  #Two columns and 4 rows
+  ncol = 2, nrow=4)
+
+
+#Add the external framework to the diagram
+annotate_figure(SoilLUEmissFut.plt, 
+    #Add a title to the entire plot
+    top=text_grob("Future Soil Emissions from Major Land Use Types"), 
+    #Add the label on the left side and rotate it
+    left = text_grob("Annual Soil Emissions (Mt/year)",  rot = 90))
+```
+
+
+## Cumulative Emissions Plots
+
+```{r}
+#summarize all vegetative emissions by year
+veg_total_year<- veg_long_sum_LU %>% 
+  group_by(year) %>% 
+  summarise(across(where(is.numeric), sum))
+
+#Calculate the cumulative sum of the emissions category
+final_tot_veg<-veg_total_year %>%
+  #sort the years in ascending order
+  arrange (year) %>%
+  mutate(aggcount = cumsum(emissions)) %>%
+  filter(year>= '1705'&year<='2060')
+
+
+#Create the total vegetative cumulative emissions 
+TotalVegEmissions.plt <- final_tot_veg %>%
+  ggplot(aes(x = year, y = aggcount)) +
+  #Use the custom fill color
+  geom_area(fill =vegCEmissions) +
+  #Add the title
+  ggtitle("Cumulative Vegetative Emissions (Mt) Over Time") +
+  #Add the justifications to the plot title
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #Set the x scale and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the labels
+  labs( x='Year', y='(Mt)') + 
+  #Set the axis scales
+  ylim(-125,1500) +
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) 
+
+```
+
+## Cumulative Land Use Emissions
+
+```{r}
+#Summarize all vegetative emissions by year by land use type
+final_veg_data<- veg_long_sum_LU %>%
+  group_by(Category, year) %>%
+  #make sure the years are in the correct order by land use type
+  arrange(Category, year) %>%
+  group_by(Category) %>%
+  #calculate the cumulative emissions for each land use type
+  mutate(aggcount = cumsum(emissions))
+
+#Create the land use area plot
+CumLandUseEmiss.plt <-final_veg_data %>%
+  ggplot(aes(x = year, y = aggcount, fill = Category)) +
+  geom_area() +
+  #Add a title
+  ggtitle("Total Cumulative Vegetative Emissions (Mt) by Land Use Over Time") +
+  #Remove the legend and add the justification for a title
+  theme(plot.title = element_text(hjust = 0.5),  legend.position="bottom")  +
+  #Scale the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the labels for the x and y axis
+  labs( x='Year', y='Total Cumulative Emissions (Mt)') + 
+  #add the custom color scale and correct labels
+  scale_fill_manual(values=LUColors, name = "Land Use", 
+                    labels = c("Forest", "Grassland", "Harvested Cropland", 
+                               "Other Arable Land", "Pasture", "Shrubland", 
+                               "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) 
+```
+
+## Veg Cumulative Emissions
+
+```{r}
+#Put the cumulative emissions together
+vegCumEmiss.plt<-ggarrange(TotalVegEmissions.plt, CumLandUseEmiss.plt, 
+          ncol = 1, nrow = 2,
+          heights = c(2, 3))
+
+vegCumEmiss.plt
+```
+
+## Future Vegetative and Soil Cumulative Emissions
+
+```{r}
+future_tot_veg<-veg_total_year %>%
+  #sort the years in ascending order
+  arrange (year) %>%
+  filter(year>= '2015'&year<='2060') %>%
+  mutate(aggcount = cumsum(emissions)) 
+  
+  
+#create the aggregated count for every modeled soil type
+future_soil_data<- new_soil_filter %>%
+  #sort by series, land use, then year
+  group_by(Series, year) %>%
+  #add everything up
+  summarise(across(where(is.numeric), sum)) %>%
+  #filter out the future values
+  filter(year>= '2015'&year<='2060') %>%
+  group_by(Series) %>%
+  #calculate the cumulative emissions
+  mutate(aggcount = cumsum(emissions))
+
+#create a future combined emissions data
+future_combined_emissions<-
+  merge(future_tot_veg, future_soil_data, by="year", all=TRUE) %>%
+               #rename all of the columns after the merge
+               rename( c("soil_emissions"= "emissions.y", 
+                          "veg_emissions" = "emissions.x", 
+                          "soil_agg_sum" = "aggcount.y", 
+                          "veg_agg_sum" = "aggcount.x")) %>%
+               #Calculate the total net emissions
+               mutate(net_emissions = soil_emissions + veg_emissions) %>%
+               #Calculate the net cumulative emissions
+               mutate(net_cum_emissions = soil_agg_sum + veg_agg_sum)
+```
+
+## Future Emissions Plots
+
+```{r}
+#Calculate the future emissions plots
+futureEmissions.plt<-ggplot(data=future_combined_emissions, aes(x=year))+
+  #Add a line plot for the soil emissions by series
+  geom_line(aes(y=soil_emissions,
+       group=Series, color=Series), lwd=2) +
+      #Add the custom color manual and labels
+      scale_color_manual(values=c(ModelColors, name = "Emissions"), 
+                      labels = c("FAO Glosis", "Houghton", "HWSD", 
+                                 "SoilGrids 2017", "SoilGrids 2020")) +
+  #Add the new scale options
+  new_scale_color() +
+  #Add a line plot for the vegetative emissions
+  geom_line(aes(y=veg_emissions, color="Vegetation"), lwd=2) +
+    scale_color_manual(values=c(vegCEmissions)) +
+  #Add the title
+  ggtitle("Future Emissions") +
+  #Add the theme elements
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #Add the labels
+  labs( x='Year', y='Total Emissions (Mt)') 
+
+
+#Add the future combined emissions for the aggregated sums
+futureCumEmissions.plt<-ggplot(data=future_combined_emissions, aes(x=year))+
+  #Add a line for soils, calculated by series
+  geom_line(aes(y=soil_agg_sum,
+       group=Series, color=Series), lwd=2) +
+      #Add the custom color manual and labels
+      scale_color_manual(values=c(ModelColors, name = "Emissions"), 
+                      labels = c("FAO Glosis", "Houghton", "HWSD", 
+                                 "SoilGrids 2017", "SoilGrids 2020")) +
+  #Add the new scale options
+  new_scale_color() +
+  #Add a line for vegetative emissions
+  geom_line(aes(y=veg_agg_sum, color="Vegetation"), lwd=2) +
+  #Add a line plot for the vegetative emissions
+    scale_color_manual(values=c(vegCEmissions)) + 
+  #Add the title
+  ggtitle("Future Cumulative Emissions") +
+  #Add the theme elements
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #Add the labels
+  labs( x='Year', y='Total Net Emissions (Mt)') 
+
+#Calculate the net emissions plots by series
+futNetEmissions.plt<-ggplot(data=future_combined_emissions, 
+                            aes(x=year, y=net_emissions, group=Series))+
+  geom_line(aes(color=Series), lwd=2) +
+      #Add the custom color manual and labels
+      scale_color_manual(values=c(ModelColors, name = "Emissions"), 
+                      labels = c("FAO Glosis", "Houghton", "HWSD", 
+                                 "SoilGrids 2017", "SoilGrids 2020")) +
+  #Add the title
+  ggtitle("Future Net Emissions") +
+  #Add the theme elements
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #Add the labels
+  labs( x='Year', y='Total Emissions (Mt)') 
+  
+#Calculate the net cumulative emissions by series
+futNetCumEmissions.plt<-ggplot(data=future_combined_emissions, 
+                               aes(x=year, y=net_cum_emissions, group=Series))+
+  geom_line(aes(color=Series), lwd=2)  +
+  #Add the custom color manual and labels
+      scale_color_manual(values=c(ModelColors, name = "Emissions"), 
+                      labels = c("FAO Glosis", "Houghton", "HWSD", 
+                                 "SoilGrids 2017", "SoilGrids 2020")) +
+  #Add the title
+  ggtitle("Future Net Cumulative Emissions") +
+  #Add the theme elements
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #Add the labels
+  labs( x='Year', y='Total Emissions (Mt)') 
+
+
+```
+
+## Composite Future Emissions
+
+```{r}
+compFutEmissions.plt<-ggarrange(futureEmissions.plt,  futureCumEmissions.plt,
+                                futNetEmissions.plt, futNetCumEmissions.plt, 
+                                nrow=2, ncol=2, common.legend = TRUE)
+
+compFutEmissions.plt
+```
+
+## Soil Cumulative Emissions
+
+```{r}
+#create the aggregated count for every modeled soil type
+final_soil_data<- new_soil_filter %>%
+  #sort by series, land use, then year
+  group_by(Series, Category, year) %>%
+  #make sure that the years are chronological order
+  arrange(Series, Category, year) %>%
+  group_by(Series, Category) %>%
+  #calculate the cumulative emissions
+  mutate(aggcount = cumsum(emissions))
+
+#Merge everything together
+new_full_data<-merge(final_soil_data, final_veg_data, 
+                     by=c("Category","year")) %>%
+               #rename all of the columns after the merge
+               rename( c("soil_emissions"= "emissions.x", 
+                          "veg_emissions" = "emissions.y", 
+                          "soil_agg_sum" = "aggcount.x", 
+                          "veg_agg_sum" = "aggcount.y")) %>%
+               #Calculate the total net emissions
+               mutate(net_emissions = soil_emissions + veg_emissions) %>%
+               #Calculate the net cumulative emissions
+               mutate(net_cum_emissions = soil_agg_sum + veg_agg_sum)
+
+```
+
+```{r}
+#Calculate soil emissions by model by series
+soil_total_year<- final_soil_data %>% 
+  group_by(Series, year) %>% 
+  #Summarise the numeric values of the model
+  summarise(across(where(is.numeric), sum))
+
+#Graph the total emissions
+Total_FAO_Soil_Emissions.plt <-  ggplot(soil_total_year %>%
+  #filter out the FAO data
+  filter(Series == 'FAO'), aes(x = year, y = aggcount)) +
+  #Customize the fill with the custom model colors
+  geom_area(fill="#370335FF") +
+  #Add a title
+  ggtitle("FAO Cumulative Soil Emissions (Mt)") +
+  #Center the plot title
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #Set the scale and breaks on the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050),
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the labels
+  labs( x='Year', y='(Mt)') + 
+  #Add the y axis limits
+  ylim(-125,1500) +
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015))  
+
+#Isolate the Houghton data
+Total_GCAM_Soil_Emissions.plt <-
+  ggplot(soil_total_year %>% 
+           filter(Series == 'Houghton'), aes(x = year, y = aggcount)) +
+  #Add the model color fill
+  geom_area(fill="#FED439FF") +
+  #Add a title
+  ggtitle("Total Houghton Cumulative Soil Emissions (Mt)") +
+  #Add the theme elements
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #Add the scale and labels for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the labels
+  labs( x='Year', y='(Mt)') + 
+  #add the y axis
+  ylim(-125,1550) +
+  #Add the vertical labels 
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015))
+
+#Repeat for Harmonzied World Soils Database
+Total_HWSD_Soil_Emissions.plt <-
+  #Filter the HWSD
+  ggplot(soil_total_year %>% filter(Series == 'HWSD'), 
+                          aes(x = year, y = aggcount)) +
+  #Use the custom model color
+  geom_area(fill="#1A9993FF") +
+  #Add the title
+  ggtitle("Total HWSD Cumulative Soil Emissions (Mt)") +
+  #customize the theme field
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #scale the x axis and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the y axis limits
+  ylim(-125,1500) +
+  #Add the labels
+  labs( x='Year', y='(Mt)') + 
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015))
+
+
+#Repeat for SG 2017
+Total_SG17_Soil_Emissions.plt <- 
+  ggplot(soil_total_year %>% 
+           #Filter the SG17 data like
+           filter(Series == 'SG17'), aes(x = year, y = aggcount)) +
+  #Add the custom colors
+  geom_area(fill="#197EC0FF") +
+  #Add the title
+  ggtitle("Total SoilGrids 2017 Cumulative Soil Emissions (Mt)") +
+  #Add the themes
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #Add the scale and labels for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add labels
+  labs( x='Year', y='(Mt)') + 
+  #Add the y limits
+  ylim(-125,1500) +
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015))
+
+#Repeat for SoilGrids 2020
+Total_SG20_soil_emissions.plt<- 
+  ggplot(soil_total_year %>%
+           #Filter the SoilGrids 2020 data
+           filter(Series == 'SG20'), aes(x = year, y = aggcount)) +
+  #Add the custom colors
+  geom_area(fill="#F05C3BFF") +
+  #Add the title
+  ggtitle("Total SoilGrids 2020 Cumulative Soil Emissions (Mt)") +
+  #Add the themes
+  theme(plot.title = element_text(hjust = 0.5)) +
+  #Add the scale and labels for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the y axis limits
+  ylim(-125,1500) +
+  #Add the labels
+  labs( x='Year', y='(Mt)') + 
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) 
+
+```
+
+
+```{r}
+#Put together the total cumulative emissions plots
+soilCumEmiss.plt<-ggarrange(TotalVegEmissions.plt, Total_FAO_Soil_Emissions.plt,
+                            Total_GCAM_Soil_Emissions.plt, 
+                            Total_HWSD_Soil_Emissions.plt, 
+                            Total_SG17_Soil_Emissions.plt, 
+                            Total_SG20_soil_emissions.plt, 
+          #Add the columns and rows
+          ncol = 2, nrow = 3)
+
+
+#add the title and axis for the cumulative plots
+annotate_figure(soilCumEmiss.plt, 
+ top=text_grob("Total Cumulative Emissions from Major Land Use Types by Model"), 
+ left = text_grob("Cumulative Emissions (Mt)",  rot = 90))
+
+
+```
+
+## MAKE THIS INTO A LINE GRAPH
+
+```{r}
+#Merge the soil_total_year and final_total_veg into one total dataset
+finalCumLineEmissions<-
+  merge(final_tot_veg, soil_total_year, by='year', all=TRUE)
+
+cumEmissionsLine.plt<-ggplot(data=finalCumLineEmissions, aes(x=year))+
+  geom_line(aes(y=aggcount.y, group=Series, color=Series), lwd=2) + 
+  geom_line(aes(y=aggcount.x, color="Veg Emissions"), lwd=2, linetype = "longdash")+
+  #Scale x breaks and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the labels
+  labs( x='Year', y='Total Cumulative Emissions (Mt)')+
+  scale_color_manual(values =c(ModelColors, "Veg Emissions"=vegCEmissions)) +
+    #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015))
+
+```
+## Cumulative Soil Emissions by Land Use
+```{r}
+#FAO plot by land use type 
+FAO_soil_LandUse.plt <- 
+  #Filter to the FAO data
+  ggplot(new_full_data %>% 
+           filter(Series == 'FAO'), 
+         aes(x = year, y = soil_agg_sum, fill = Category)) +
+  #plot the area
+  geom_area() +
+  #Add the title
+  ggtitle("FAO Glosis") +
+  #Add the theme elements
+  theme(plot.title = element_text(hjust = 0.5), 
+        #Remove the legend
+        legend.position="none", 
+        #Remove the y axis title
+        axis.title.y = element_blank())  +
+  #Scale x breaks and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the labels
+  labs( x='Year', y='Total Cumulative Emissions (Mt)') + 
+  #Add the custom color manual and labels
+  scale_fill_manual(values=LUColors, name = "Land Use", 
+                    labels = c("Forest", "Grassland", "Harvested Cropland", 
+                               "Other Arable Land", "Pasture", "Shrubland", 
+                               "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Edit the y scale
+  ylim(-8000,8500)+
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015))
+
+#Repeat for the Houghton level data
+GCAM_soil_LandUse.plt <-
+  #Filter to Houghton
+  ggplot( new_full_data %>% 
+          filter(Series == 'Houghton'), 
+          aes(x = year, y = soil_agg_sum, fill = Category)) +
+  #Plot the area
+  geom_area() +
+  #Add the title
+  ggtitle("Houghton") +
+  #Edit the theme elements
+  theme(plot.title = element_text(hjust = 0.5), 
+        #Remove the legend
+        legend.position="none", 
+        #Remove the axis title
+        axis.title.y = element_blank())  +
+  #Add the custom scale and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the labels
+  labs( x='Year', y='Total Cumulative Emissions (Mt)') + 
+  #Add the custom color and labels
+  scale_fill_manual(values=LUColors, name = "Land Use", 
+                    labels = c("Forest", "Grassland", "Harvested Cropland", 
+                               "Other Arable Land", "Pasture", "Shrubland", 
+                               "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Set a common label axis
+  ylim(-8000,8500)+
+  #Set the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015))
+
+#Repeat for HWSD
+HWSD_soil_LandUse.plt <- 
+  ggplot(new_full_data %>% 
+           #Filter the HWSD Data
+           filter(Series == 'HWSD'), 
+         aes(x = year, y = soil_agg_sum, fill = Category)) +
+  #Plot the area
+  geom_area() +
+  #Add a title
+  ggtitle("Harmonized World Soils Database") +
+  #Set the custom theme element
+  theme(plot.title = element_text(hjust = 0.5),  
+        #Remove the legend
+        legend.position="none", 
+        #Remove the legend title
+        axis.title.y = element_blank())  +
+  #set the scale breaks and labels
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Set the axis labels
+  labs( x='Year', y='Total Cumulative Emissions (Mt)') + 
+  #Set the custom color fill and names
+  scale_fill_manual(values=LUColors, name = "Land Use", 
+                    labels = c("Forest", "Grassland", "Harvested Cropland", 
+                               "Other Arable Land", "Pasture", "Shrubland", 
+                               "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #set the custom axis
+  ylim(-8000,8500)+
+  #add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015))
+
+#Repeat for SoilGrids 2017
+SG17_soil_LandUse.plt <- 
+  ggplot(new_full_data %>%
+           #Filter the soilgrids 2017 data
+           filter(Series == 'SG17'), 
+         aes(x = year, y = soil_agg_sum, fill = Category)) +
+  #plot the area
+  geom_area() +
+  #add the title
+  ggtitle("SoilGrids 2017") +
+  #Add the theme elements
+  theme(plot.title = element_text(hjust = 0.5),  
+        #remove the legend
+        legend.position="none", 
+        #Remove the axis title
+        axis.title.y = element_blank())  +
+  #Add the breaks and labels for the x axis
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the labels
+  labs( x='Year', y='Total Cumulative Emissions (Mt)') + 
+  #Add the custom color fill and labels
+  scale_fill_manual(values=LUColors, name = "Land Use", 
+                    labels = c("Forest", "Grassland", "Harvested Cropland", 
+                               "Other Arable Land", "Pasture", "Shrubland", 
+                               "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Add a custom y axis
+  ylim(-8000,8500)+
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015))
+
+
+#Repeat for SoilGrids 2020
+SG20_soil_LandUse.plt <- 
+  ggplot(new_full_data %>%
+           #Filter the soilgrids 2020 data
+         filter(Series == 'SG20'), 
+         aes(x = year, y = soil_agg_sum, fill = Category)) +
+  #Plot the area
+  geom_area() +
+  #Add the title
+  ggtitle("SoilGrids 2020") +
+  #Add the theme elements
+  theme(plot.title = element_text(hjust = 0.5),  
+        #Remove the legend
+        legend.position="none", 
+        #remove the axis name
+        axis.title.y = element_blank())  +
+  #scale the x axis breaks and values
+  scale_x_continuous(breaks=c(1700,1750,1800,1850,1900,1950,2000,2050), 
+                     labels = c("1700","1750","1800","1850","1900","1950",
+                                "2000","2050")) +
+  #Add the labels
+  labs( x='Year', y='Total Cumulative Emissions (Mt)') + 
+  #add the custom color and names
+  scale_fill_manual(values=LUColors, name = "Land Use", 
+                    labels = c("Forest", "Grassland", "Harvested Cropland", 
+                               "Other Arable Land", "Pasture", "Shrubland", 
+                               "Tundra", "Unmanaged Pasture", "Urban Land")) +
+  #Add the custom y axis
+  ylim(-8000,8500)+
+  #Add the vertical lines
+  geom_vline(xintercept = c(1850, 1950, 1990, 2015)) 
+
+```
+
+
+```{r}
+#Compile the Land use emissions by adding the land use legend
+Soil_LU_CumEmiss.plt<-ggarrange(FAO_soil_LandUse.plt, GCAM_soil_LandUse.plt,
+                                HWSD_soil_LandUse.plt, SG17_soil_LandUse.plt,
+                                SG20_soil_LandUse.plt, LUleg,
+    ncol = 2, nrow = 3)
+
+#add the emissions title
+annotate_figure(Soil_LU_CumEmiss.plt, 
+  top=text_grob("Soil Cumulative Emissions (Mt) from Land Use Types by Model"),
+  #Add the custom axis
+  left = text_grob("Cumulative Total Emissions (Mt)",  rot = 90))
+```
+
